@@ -2,7 +2,7 @@
 
 ## 1. 验证目标
 
-本方案面向 interaction 1.1 新增的两项机制：
+本方案面向 interaction 1.1/1.1.1 的两项机制与新增接口合同：
 
 - MMU 内部 miss queue 缓存、合并并唤醒 miss 请求；
 - LSU 内部 LRQ 保存请求并 replay，不再依赖 IDU 重新发射。
@@ -15,7 +15,7 @@
 4. replay 的功能元数据必须与原始请求相同；任一 valid-qualified payload 不得包含 `X/Z`。
 5. MMU 请求、响应、stall、abort 和 wakeup 必须满足明确且可断言的接口合同。
 
-interaction 1.1 复核后，目标环境固定采用以下合法合同：`mmu_lsu_stall==0`；access fault 在请求后一拍返回；`page_fault -> pa_vld` 且同拍；fresh IDU 在进入 AG 前已由 LRQ `no_space` 完成容量预留。违反这些合同的激励不再作为目标功能用例，而应由 assumption/assertion 在边界处拒绝。
+目标环境固定采用以下合法合同：`mmu_lsu_stall==0`；access fault 在请求后一拍返回；`page_fault -> pa_vld` 且同拍；fresh IDU 在进入 AG 前已由 LRQ `no_space` 完成容量预留；`mmu_accept = lsu_mmu_va_vld && !lsu_mmu_abort` 且当拍记录、下一拍生效；accept 后 abort 不可追溯取消；MMU immediate wake 必须在 LRQ create 后一拍送达；flush 优先于 raw pop；D-cache 投机读无副作用且无效结果不可消费；`pfu_part_empty` 永久 tie 0；只支持 README 指定的固定参数组合。违反这些合同的激励不再作为目标功能用例，而应由 assumption/assertion 在边界处拒绝。
 
 ## 2. 建议验证环境
 
@@ -49,10 +49,10 @@ MMU 模型至少支持：
 - miss 入队后 N 拍完成；
 - accepted miss（目标接口不使用 `mmu_lsu_stall` 表示 not-ready）；
 - 同 VA 多请求 merge；
-- immediate wakeup 和 async bitmap wakeup；
+- immediate wakeup 和 async bitmap wakeup；immediate-only 场景不得靠后续 async 脉冲兜底；
 - page fault 与同拍 `pa_vld`；
 - 请求后一拍 access fault；
-- abort 对“同拍未接受请求”和“已入队请求”的两种语义开关；
+- 同拍 abort 阻止 accept，accept 后的后拍 abort 不得追溯取消；
 - flush 后迟到响应/迟到 wakeup 注入。
 
 ## 3. P0：必须首先执行的定向测试
@@ -63,19 +63,22 @@ MMU 模型至少支持：
 
 | ID | 场景与激励 | 必查结果 | 关联源码/风险 |
 |---|---|---|---|
-| V0-NS-FRESH | 三条 load lane 分别发送 `no_spec_exist=1`，覆盖 `no_spec=00/01/10/11` | 先记录当前 RTL 会清零 fresh `no_spec_exist`；若接口合同要求保留原 predictor 状态，则 LRQ mux、AG/DC/DA 必须逐位直通；若合同明确忽略它，则证明该输入不可观察/输出恒 0，并删除或约束死端口 | `srcs/xx_lsu_lrq.sv:1792-1794`；RR-01 |
-| V0-NS-REPLAY | 同一组 no-spec 请求 create 后随机等待 0/1/N 拍再 replay | valid replay 的 `no_spec` 不得为 X；`no_spec_exist` 必须符合设计方确认的 predictor/wait-state 语义，只有确认其代表原 predictor metadata 时才要求与 create 输入逐位相等 | `srcs/xx_lsu_lrq_entry.sv:721-740`；RR-01/RR-02 |
+| V0-NS-FRESH | 三条 load lane 分别发送不同 predictor `no_spec_exist`，覆盖 `no_spec=00/01/10/11` | 证明旧 predictor exist 输入在 LSU 内不可观察；fresh 输出按新合同清零，内部 `no_spec_exist` 只由 LRQ wait 状态建立 | `srcs/xx_lsu_lrq.sv:1792-1794`；已关闭 RR-01 |
+| V0-NS-REPLAY | 同一组 no-spec 请求 create 后随机等待 0/1/N 拍再 replay | valid replay 的 2-bit `no_spec` 不得为 X；改义后的 `no_spec_exist` 必须准确表示内部 wait 历史，不要求等于旧 predictor 输入 | `srcs/xx_lsu_lrq_entry.sv:721-740`；RR-02 |
 | V0-REPLAY-X | scalar、boundary LDR、vector indexed、vector US 分别 replay，开启 X-prop | valid 的 AG→DC、AG→MMU、AG→IDU payload 不含 X；地址、mask、element count、rotation 与参考模型一致 | `srcs/xx_lsu_lrq.sv:1786-1818`；RR-02 |
+| V0-CASE-X | 依次给 `bytes_vld1` selector 注入 `X00`、`0X0`、`00X` 和每个二值组合，预先把输出置成相反旧值 | 二值组合结果正确；每个需要参与决策的 X 必须显式传播，不能保留上拍值。若合同要求任一 X 都传播，don't-care 位也必须输出 X | `srcs/xx_lsu_ld_ag.sv:2158-2166`；RR-12 |
 | V0-HALT | 开启地址 trigger；LRQ replay 同拍在 IDU bus 放另一条不同 `halt_info` 指令 | replay 指令的 trigger/halt 结果只能取原事务 metadata，不得受当前 IDU 污染 | `srcs/xx_lsu_top.sv:5392-5395`；RR-03 |
 | V0-MMU-CONTRACT | 集成层保持 `mmu_lsu_stall==0`；另在接口断言单元故意注入 1 | 目标回归中该信号永远为 0；负向注入必须立即触发合同断言，而不是继续验证未定义行为 | `srcs/xx_lsu_top.sv:421-424`、`srcs/xx_lsu_ld_ag.sv:2765`；RR-04 |
 | V0-FRESH-MISS-OVERRIDE | fresh A 遇到结构/D-cache stall，MMU 同拍接受 miss（`pa_vld=0, abort=0`），更老 RF B 同拍覆盖 A | A 只允许由 MMU pending 拥有；新建 LRQ entry 必须 frozen，MMU wakeup 前不得 replay/再次发 MMU 请求；wakeup 后恰好 replay 一次 | `srcs/xx_lsu_ld_ag.sv:2827-2854`、`srcs/xx_lsu_ld_ag.sv:3030-3035`；RR-13 |
+| V0-MMU-IMME-STALLED | fresh A 遇到 D-cache 结构反压、无更老 RF，MMU 同拍 `imme_wakeup=1`；另覆盖有更老 RF及无结构反压 | A 以 frozen entry 创建时，下一拍必须收到正确 one-hot wakeup 并变 ready；wakeup 不得被 `ldc_ex2_inst_vld=0` 屏蔽；每个请求只 wake 一次 | `srcs/xx_lsu_ld_dc.sv:1113-1154`、`srcs/xx_lsu_ld_dc.sv:2213-2218`；RR-16 |
+| V0-DCACHE-SPEC | 交叉 `pa_vld=0`、PF/AF、`CA=0` 与 tag/data hit/miss，并监测替换/训练/LQ/WB | 投机读不更新任何状态；无效 tag/data 不得进入 LQ、WB、异常之外的架构路径；D-cache select 同拍即 accept | `srcs/xx_lsu_ld_ag.sv:2548-2569`；已关闭 RR-11 合同回归 |
 | V0-FAULT-BKCON | 请求遇到 D-cache backpressure；AF 仅在请求后一拍脉冲，PF 与 `pa_vld=1` 同拍；backpressure 覆盖 1/N 拍 | 合法响应不得漏异常或串事务；另以负向断言单元验证“同拍 AF”及 `PF && !pa_vld` 会被合同检查拒绝 | `srcs/xx_lsu_ld_ag.sv:1352-1378`；已关闭 RR-05/RR-07 |
 | V0-ABORT-RESTART | A 因非 MMU 原因 abort 且被更老 RF B 覆盖；分别覆盖 fresh、已建项和 replay；再单独覆盖 accepted miss | MMU 未登记 A 时 controller 必须用正确 LRQ bit 立即解冻；MMU 已登记 miss 时不得立即解冻，只能等待 async wakeup | `srcs/xx_lsu_ld_ag.sv:2846-2854`、`srcs/xx_lsu_ctrl.sv:849-853`；RR-06 回归/RR-13 |
-| V0-CREATE-FLUSH | LRQ create 与 full flush、partial flush 分别同拍 | 被 kill 时不得分配，也不得向 IDU 产生有效 pop；未被 kill 时 create/pop 必须共同成功 | `srcs/xx_lsu_lrq.sv:1448-1452`、`srcs/xx_lsu_lrq.sv:1692-1693`；RR-08 |
-| V0-CREATE-FULL | 每条 lane 独立覆盖 empty、one-left、reserved-threshold、full；再叠加三 lane 同拍 create/pop | `no_space` 必须阻止已满 lane 发射；每个被接受请求的本 lane free pointer 为 one-hot，allocation/pop 与统一 accept 一致；三 lane 之间不得串 entry，但不假设它们竞争同一 pointer | `srcs/xx_lsu_lrq.sv:1411-1470`、`srcs/xx_lsu_lrq.sv:1628-1683`；RR-08 |
-| V0-WAKE-OWNERSHIP | 覆盖 MMU wakeup 与 create 同拍/后一拍、full flush、partial flush、LRQ bit 立即复用、旧 wakeup 延迟 1/N 拍 | 合法合同下 wakeup 不丢失且只命中原事务；任何无 generation 的迟到 wakeup 必须被取消或被断言拒绝 | `srcs/xx_lsu_ctrl.sv:949-988`、`srcs/xx_lsu_lrq_entry.sv:817-822`；RR-14 |
-| V0-SPECIAL-CLK | 在真实 clock-gating 模式分别触发 LRQ create、VMB create0/1、VB create、store-DA special event，并切换 PFU empty | 所有消费者的状态都正确采样；idle 时 special clock 可停止；不得依赖 `pfu_part_empty=0` 永久开钟掩盖漏项 | `srcs/xx_lsu_ctrl.sv:539-563`、`srcs/xx_lsu_top.sv:3761`；RR-15 |
-| V0-PARAM | 分别 elaboration 默认值、`LRQENTRY>LSIQENTRY`、`PC_LEN!=15`、`VMBENTRY!=8`、split width 非 9 | 支持配置必须无截断；不支持配置必须在 elaboration 明确失败 | RR-10 |
+| V0-CREATE-FLUSH | LRQ create 与 full flush、partial flush 分别同拍 | 被 kill 时不得分配；raw pop 可以拉高，但上游必须由 flush 优先杀掉同一 LSIQ 项，且不得留下“仅 pop、未 flush”的存活事务 | `srcs/xx_lsu_lrq.sv:1448-1452`、`srcs/xx_lsu_lrq.sv:1692-1693`；已关闭 RR-08 合同回归 |
+| V0-CREATE-FULL | 无 flush 下，每条 lane 独立覆盖 empty、one-left、reserved-threshold、full；再叠加三 lane 同拍 create/pop | `no_space` 必须阻止已满 lane 发射；每个 accepted create 的本 lane free pointer 为 one-hot，allocation/pop 对应同一事务；三 lane 之间不得串 entry | `srcs/xx_lsu_lrq.sv:1411-1470`、`srcs/xx_lsu_lrq.sv:1628-1683`；容量合同回归 |
+| V0-WAKE-OWNERSHIP | 禁止 create 同拍 MMU wake；覆盖 create 后一拍 immediate、N 拍 async、full/partial flush、LRQ bit 立即复用和旧 wakeup 迟到 | 合法 wakeup 不丢失且只命中原事务；任何旧 generation 的 async bitmap 必须在复用前取消或被过滤 | `srcs/xx_lsu_ctrl.sv:949-988`、`srcs/xx_lsu_lrq_entry.sv:817-822`；RR-14/RR-16 |
+| V0-SPECIAL-CLK | 在 ICG on/off 与 scan 模式下检查永久 `pfu_part_empty=0` 配置 | `lsu_special_clk_en` 在支持配置下恒有效，所有消费者正常采样；只记录功耗，不再要求 idle 停钟 | `srcs/xx_lsu_ctrl.sv:539-563`、`srcs/xx_lsu_top.sv:3761`；已关闭 RR-15 |
+| V0-PARAM | elaboration 正式固定组合，并分别尝试 `LRQENTRY!=LSIQENTRY`、`PC_LEN!=15`、`VMBENTRY!=8`、split width 非 9 | 支持组合无截断；每个不支持组合必须由静态检查明确失败，而不是静默 elaboration | 已关闭 RR-10/配置检查 |
 
 ## 4. MMU miss queue 与 replay 生命周期
 
@@ -106,20 +109,21 @@ MMU 模型至少支持：
 4. `miss -> full flush -> 同一 LRQ bit 立即复用 -> 旧 wakeup 迟到`，旧 wakeup 不得解冻新事务。
 5. `accepted miss + AG D-cache stall + 更老 RF 覆盖 -> 新建 entry 保持 frozen -> MMU wake -> 单次 replay`。
 6. `非 miss AG stall + 更老 RF 覆盖 -> 新建/已有 entry 立即 ready -> 单次 replay`。
+7. `MMU immediate wake + D-cache 结构反压 + 无更老 RF -> frozen entry -> 下一拍 one-hot wake -> replay`，不得因请求未进入 DC 而丢 wakeup。
 
 ### 4.3 MMU 请求稳定性
 
-一旦定义 accept 条件，例如：
+正式 accept 条件为：
 
 ```text
-mmu_accept = lsu_mmu_va_vld && !mmu_lsu_stall && !lsu_mmu_abort
+mmu_accept = lsu_mmu_va_vld && !lsu_mmu_abort
 ```
 
-就应检查：
+在该合同下应检查：
 
-- 从 request 出现到 accept 前，`va/id/lsid/st_inst` 保持稳定；
-- 每个请求最多 accept 一次；
-- accept 后，后续端口 abort 不得意外取消已接受项，除非 abort 明确携带同一事务 tag；
+- accept 拍的 `va/id/lsid/st_inst` 全部属于同一事务，且 miss queue 对同一 `{IID, lsid}` 不重复建项；
+- accept 后，后续端口 abort 不得取消已接受项；
+- `imme_wakeup` 若与 accept 同拍，下一拍必须携带同一 lsid 到达 LRQ，不依赖 DC accept；
 - wakeup bitmap 只命中仍有效且属于同一 flush epoch 的 entry。
 
 ## 5. Stall、优先级与 flush
@@ -146,7 +150,8 @@ mmu_accept = lsu_mmu_va_vld && !mmu_lsu_stall && !lsu_mmu_abort
 
 - atomic/bar/no-spec 与 cross-page 同拍；
 - MMU accepted miss 与 D-cache stall 同拍，并分别覆盖有/无更老 RF；
-- `mmu_lsu_pa_vld=0 && !lsu_mmu_abort` 时检查“MMU ownership -> frozen -> async wake -> 单次 retry”；`lsu_mmu_abort=1` 时检查“controller ownership -> immediate wake -> 单次 retry”；
+- `mmu_lsu_pa_vld=0 && !lsu_mmu_abort` 时检查“MMU ownership -> frozen -> immediate(下一拍)/async wake -> 单次 retry”；`lsu_mmu_abort=1` 时检查“controller ownership -> immediate wake -> 单次 retry”；
+- MMU `imme_wakeup=1` 与 D-cache stall 同拍时，即使 `lag_ldc_ex1_inst_vld=0`，下一拍仍必须按 accept lsid 唤醒；
 - stall 时 `idu_lsu_rf_older_vld=0/1`；
 - replay 请求遇到新 stall；
 - 每一个优先级冲突只能选择一种恢复动作。
@@ -275,7 +280,7 @@ idu_lsu_rf_sel -> idu_lsu_rf_gateclk_sel
 
 还要覆盖 reset、full/partial flush、local stall、cross-page 状态、LRQ replay 在 ICG on/off 和 scan enable 下的行为；清除状态不能依赖一个可能关闭的时钟。
 
-`lsu_special_clk` 需要单独做真实门控验证。当前 `lsu_special_clk_en` 包含 `!pfu_part_empty`，而 top 把 `pfu_part_empty` 固定为 0，所以时钟恒开：`srcs/xx_lsu_ctrl.sv:539-563`、`srcs/xx_lsu_top.sv:3761`。修复 tie-off 后，必须逐项证明 LRQ create、VMB create0/1、VB create、store-DA special event 都能在首拍打开该时钟；尤其检查 controller 重复使用 create0 而遗漏 create1 的表达式。
+`lsu_special_clk` 按正式配置不做 idle 门控。`lsu_special_clk_en` 包含 `!pfu_part_empty`，top 又永久把 `pfu_part_empty` 固定为 0，所以时钟恒开：`srcs/xx_lsu_ctrl.sv:539-563`、`srcs/xx_lsu_top.sv:3761`。验证目标改为证明 tie-off/时钟常开合同在 ICG on/off 与 scan 下成立，所有消费者都能采样；不再测试恢复真实 empty。controller 中重复 create0、遗漏 create1 等表达式仅列死代码/功耗清理，除非未来正式改变永久 tie-off 合同。
 
 ### 9.2 X-prop
 
@@ -299,6 +304,26 @@ a_target_mmu_stall_tieoff:
 assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
   !mmu_lsu_stall);
 
+// 正式 MMU accept 定义；miss queue scoreboard 应以该事件记账。
+wire mmu_accept = lsu_mmu_va_vld && !lsu_mmu_abort;
+
+// top 发给 MMU 的 lsid 必须与 accept 拍 AG 选择的 lsid 完全一致。
+a_mmu_accept_lsid:
+assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
+  mmu_accept |-> (lsu_mmu_lsid0 == lag_ldc_ex1_lsid));
+
+// 永久放松钟控与固定参数合同。
+a_pfu_part_empty_tieoff:
+assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
+  !pfu_part_empty);
+
+initial begin
+  assert (LRQENTRY == LSIQENTRY);
+  assert (PC_LEN == 15);
+  assert (VMBENTRY == 8);
+  assert (`SPILT_NUM_WIDTH == 9);
+end
+
 // 合法 page fault 必须与 pa_vld 同拍
 a_page_fault_has_pa_valid:
 assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
@@ -314,13 +339,11 @@ a_rf_sel_has_data_clock:
 assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
   idu_lsu_rf_sel |-> idu_lsu_rf_gateclk_sel);
 
-// 仅当设计合同确认 fresh 需要保留原 predictor metadata 时启用；
-// 若合同要求忽略该输入，则改为证明输入不可观察且输出为约定安全值。
-a_fresh_no_spec_passthrough:
+// fresh 的旧 predictor exist 输入在 LSU 内有意失效；内部状态另行检查。
+a_fresh_no_spec_exist_repurposed:
 assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
   (lsu0_issue_sel_idu && lsu0_issue_permit_idu)
-  |-> (lrq_lsu0_rf_no_spec == idu_lsu0_rf_no_spec
-       && lrq_lsu0_rf_no_spec_exist == idu_lsu0_rf_no_spec_exist));
+  |-> !lrq_lsu0_rf_no_spec_exist);
 
 // replay 不得再次建立 entry
 a_replay_no_recreate:
@@ -353,6 +376,13 @@ assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
   txn_mmu_pending && !txn_mmu_wakeup
   |-> !txn_lrq_issue);
 
+// RR-16：MMU immediate wake 必须独立于“是否进入 DC”，在下一拍送到同一 LRQ bit。
+// 当前结构反压场景会因 ldc_ex2_inst_vld=0 使该断言失败。
+a_mmu_immediate_wakeup_next_cycle:
+assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
+  (mmu_accept && mmu_lsu_imme_wakeup0 && |lsu_mmu_lsid0)
+  |=> (ldc0_ex2_imme_wakeup == $past(lsu_mmu_lsid0)));
+
 // 先把 full/partial-flush kill 与分配合并成唯一 create_accept。
 // 信号名按 LRQ 层级书写；若从 top 绑定，应补相应层级路径。
 assign lrq0_create_kill = rtu_lsu_flush_fe
@@ -372,10 +402,12 @@ a_lrq_allocation_matches_accept:
 assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
   (|lrq0_create_vld) == lrq0_create_accept);
 
-// LSIQ pop 不能发生在分配失败或 flush kill 的周期。
-a_lrq_pop_matches_accept:
+// RR-08 的正式合同允许 flush 拍 raw pop 拉高，但上游 flush 必须优先杀掉源项。
+// upstream_lsiq_entry_live 是验证环境按 pop_entry 跟踪的抽象状态。
+a_flush_dominates_raw_pop:
 assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
-  lrq0_idu_ex3_pop_vld == lrq0_create_accept);
+  (lrq0_create_kill && lrq0_idu_ex3_pop_vld)
+  |=> !upstream_lsiq_entry_live);
 
 // AG create_already 和发给 MMU 的 lsid 也应使用同一个 accept/scoreboard 事件核对。
 
@@ -399,6 +431,16 @@ assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
                    lag_ldc_ex1_addr0, lag_ldc_ex1_bytes_vld,
                    lag_ldc_ex1_page_ca, lag_ldc_ex1_page_so,
                    lag_ldc_ex1_no_spec, lag_ldc_ex1_inst_type}));
+
+// 若正式解释是 selector 任一 X 都必须传播，则启用该强版本；
+// 若 don't-care 位允许 X，只对决策相关位拆分同类断言。
+a_bytes_vld1_x_propagates:
+assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
+  (lag_ex1_inst_vld
+   && $isunknown({lag_lrq_replay_vld,
+                  lag_ldc_ex1_inst_vls,
+                  lag_ldc_ex1_inst_us}))
+  |-> $isunknown(lag_ldc_ex1_bytes_vld1));
 ```
 
 RR-14 不能只靠 LRQ bit 写出充分断言；验证环境必须给每次 entry 分配递增 generation，并把 MMU pending/wakeup 记录到 scoreboard：
@@ -412,10 +454,11 @@ assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
        && wakeup_generation == lrq_entry_generation
        && wakeup_flush_epoch == current_flush_epoch));
 
-// 若正式合同禁止 create 同拍 wakeup，应直接固化。
-a_no_same_cycle_create_wakeup:
+// interaction 1.1.1 只正式禁止 create 与 MMU wakeup 同拍；
+// mmu_wakeup_for_entry 仅合并该 entry 的 MMU immediate/async 位，不含其他本地 wakeup。
+a_no_same_cycle_create_mmu_wakeup:
 assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
-  !(lrq_entry_create_vld && lsu_lrq_frz_clr));
+  !(lrq_entry_create_vld && mmu_wakeup_for_entry));
 ```
 
 ## 11. 功能覆盖
@@ -429,11 +472,13 @@ assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
 - stall 来源 × `{无更老 RF, 有更老 RF}`。
 - flush 点 × `{full, partial-kill, partial-keep}`。
 - LRQ occupancy `{empty, one-left, reserved threshold, full}` × `{单 lane create, 三 lane 同拍 create, 同拍 pop}`。
-- no-spec `{00,01,10,11}` × exist `{0,1}` × `{fresh,replay}` × lane `{0,2,3}`。
+- no-spec `{00,01,10,11}` × 旧 predictor exist `{0,1}` × 内部 wait exist `{0,1}` × `{fresh,replay}` × lane `{0,2,3}`。
 - MMU response `{hit/PF 同拍, AF 下一拍, miss N 拍 wake}` × backpressure `{0,1,N}`。
-- wakeup `{controller immediate, MMU async one-bit, MMU async multi-bit}` × latency `{0,1,N}` × create/flush/reuse。
+- wakeup `{controller immediate, MMU immediate, MMU async one-bit, MMU async multi-bit}` × 合法 latency `{MMU immediate=1, async=1/N}` × create/flush/reuse。
+- MMU immediate `{0,1}` × D-cache 结构反压 `{0,1}` × 更老 RF `{0,1}`，`imme=1, stall=1, older=0` 必须命中 RR-16 定向覆盖。
 - MMU ownership `{none,pending}` × 更老 RF `{0,1}` × LRQ create freeze `{0,1}`，非法的 `pending && ready` 必须 0 hit。
-- special clock consumer × `{PFU empty 0/1}` × `{ICG on/off, scan on/off}`。
+- special clock consumer × 固定 `PFU empty=0` × `{ICG on/off, scan on/off}`。
+- `bytes_vld1` selector 二值 8 组合 × 决策位 X 注入 × 输出 `{X,保留旧值}`；合法目标只允许 X。
 
 ### 11.2 覆盖完成条件
 
@@ -450,25 +495,20 @@ assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
 
 `xx_lsu_ld_ag` 及新 MMU/LRQ 机制满足以下条件后，才建议关闭验证：
 
-1. RR-13 已修复或由不可绕过的仲裁合同证明：MMU pending 与 LRQ ready 永远互斥。
-2. RR-14 的 create/wakeup 最短延迟和 flush/reuse 合同已固化；旧 wakeup 不能丢失或污染新 generation。
-3. RR-01 的 no-spec predictor/wait-state 语义已确认；所有 replay X 与跨事务 metadata 问题已修复，三 lane 定向测试全部通过。
-4. MMU 的 accept/abort/response/wakeup 合同形成书面说明，并有断言保护；`mmu_lsu_stall==0` 在集成层已证明。
-5. LRQ create 有唯一、可观察的 accept 语义；分配、MMU lsid、LSIQ pop 和 `create_already` 一致。
-6. RR-15 的 special clock 能真实关闭，所有启动事件都能可靠开钟。
-7. scalar、LDR、vector、AMO/LR 的 hit/miss/fault/replay 端到端 scoreboard 全部通过。
-8. 默认配置完成 compile/elaboration、lint、CDC/clock-gating 检查和 X-prop；支持的非默认参数也必须 elaboration 通过。
-9. assertion 0 failure，功能覆盖目标全部达到；任何未达到项都有设计方签字的明确豁免。
+1. RR-16 已修复：任一被接受请求的 MMU immediate wake 都在下一拍到达同一 LRQ bit，不受 DC accept/结构反压门控。
+2. RR-13 已修复或由不可绕过的仲裁合同证明：MMU pending 与 LRQ ready 永远互斥。
+3. RR-14 的 flush/reuse 合同已固化；旧 async wakeup 不能污染新 generation；create 同拍 wakeup 的禁止合同有断言保护。
+4. RR-02/RR-03 的 replay metadata 已补齐；RR-12 按确认范围显式传播 X，三 lane 定向测试全部通过。
+5. MMU 的 accept/不可追溯 abort/response/immediate+async wakeup 合同形成书面说明并有断言保护；`mmu_lsu_stall==0` 在集成层已证明。
+6. 已关闭合同均通过回归：flush 优先 raw pop、D-cache 投机读无副作用、旧 predictor `no_spec_exist` 不可观察、共享 SQ-not-full 语义正确。
+7. `pfu_part_empty=0` 和固定参数组合由静态检查固化；不支持配置明确 elaboration 失败。
+8. scalar、LDR、vector、AMO/LR 的 hit/miss/fault/replay 端到端 scoreboard 全部通过。
+9. 支持配置完成 compile/elaboration、lint、CDC/clock-gating 检查和 X-prop；assertion 0 failure，功能覆盖目标全部达到。
 
 ## 13. 需要设计方在执行回归前确认的问题
 
-1. MMU request accept 的精确定义是什么？accepted miss 后，后续 `lsu_mmu_abort` 是否可能追溯取消它？
-2. RR-13 场景是否存在未提供的仲裁合同，能阻止非 frozen fresh entry 在 MMU wakeup 前 replay？
-3. MMU async wakeup 最短延迟是多少，能否与 LRQ create 同拍，能否多 bit？
-4. flush 后旧 miss queue 项如何被取消或携带 generation/epoch，避免命中复用 LRQ bit？
-5. create 与 flush 同拍时，为什么 LRQ allocation 与 IDU pop 不共享同一 accept？
-6. replay 必须保存的 metadata 清单是什么？
-7. no-spec predictor metadata 与 LRQ wait-no-spec 状态是否为两个独立字段？
-8. D-cache 在 PA/异常未决时的 tag/data 读是否完全无副作用？
-9. 当前正式支持哪些 `LRQENTRY/LSIQENTRY/PC_LEN/VMBENTRY/split width` 参数组合？
-10. `pfu_part_empty=0` 是临时还是量产配置？恢复真实 clock gating 时，special-clock 的完整启动事件清单是什么？
+1. RR-13：既然正式 accept 条件会在触发拍记录 `lsu_mmu_lsid0`，哪条未提供方程能让 `stall_restart_entry=0` 阻止该 lsid 入队？
+2. RR-16：MMU immediate wake 是否保证还会另发 async bitmap？若不会，结构反压时下一拍 LRQ wakeup 应由哪条路径产生？
+3. RR-14：full/partial flush 后，已 accept miss 的 pending lsid 如何取消或关联 generation/epoch，避免旧 wakeup 命中复用 bit？
+4. replay 必须保存的 metadata 清单是什么？README 第 12 项的 D-cache 回答未覆盖 `inst_ldr/no_spec/VL/vmask/mask source/halt_info`。
+5. RR-12 的 X-prop 精确范围是什么：只覆盖参与当前选择的位，还是 selector 任一 bit 为 X 都必须传播？
