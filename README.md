@@ -1,11 +1,21 @@
-# interaction 1.1
-针对doc-1.1中xx_lsu_ld_ag_risk_review列出的风险点，有如下细节补充：
+# interaction 1.1.1
+针对doc-1.1中xx_lsu_ld_ag_risk_review列出的风险点，有如下细节进行澄清：
 ***
-1. 针对RR05，mmu返回的access-fault由于时序关系，是在发起mmu请求的下一篇返回结果，因此如果在lag_bkcon_stall_vld=1是发起mmu请求，access_fault是在lag_bkcon_stall_already=1返回结果，此时锁存access-fault恰好对拍；
-2. 针对RR06，可以确定mmu_lsu_stall信号是tie 0的，因此不会出现所述的场景：mmu没有接收请求，但是寄存bkcon_tlbmiss导致不再发送请求；之前确实出现设计bug，原因是用lag_ldc_ex1_utlb_miss信号替代lag_stall_ori_tlbmiss_not_abort产生重发信号，设计初衷是，当有更老的rf栈请求B，需要覆盖停顿的更新的ag栈请求A，此时如果发生tlbmiss，则由mmu记录唤醒，否则直接用ag——controler重发；但是lag_ldc_ex1_utlb_mis并未考虑lsu_mmu_abort，此时如果发生lsu_mmu_abort，请求未被mmu记录，也未被ag唤醒，导致请求丢失；请检查类似bug（为此，我将controler模块补充）；
-3. 针对RR07，mmu能够确保page_fault=1时，pa_vld=1，且同拍，即后者时前者的必要条件；设计初衷是在停顿期间如果出现页故障，则将其记录下来，并且不再访问mmu；
-4. 针对RR08，对于非replay的请求（来自idu），详见xx_lsu_lrq:1635-1637的lrq0_no_space信号，确保新请求进入ag之前有空余项让其创建；
-5. 针对RR09，这些信号原来是输入给IDU的（原始设计是从IDU进行replay），现在相应的输入到LRQ模块（现在从LRQ进行replay）
-6. 针对RR12，lag_ldc_ex1_bytes_vld1的always语句的case已经囊括了所有情况000-111；
+1. 针对RR-08，如果在创建lrq时发生flush时，上游项也会被flush，因此对于上游的lsiq项，flush的优先级比pop的优先级高，也就是您说的"上游明确规定 flush 周期无条件忽略该 pop"
+2. 针对RR-11，能够确保dcache读没有副作用，如果pa-vld等于0，表示tlb-miss，将在ldc栈进行重发，异常或者ca=0，即使读出的数据/tag也不会被使用，这个是原C910设计，没有动。
+3. 针对RR-12，如果case出现x态，我们实际上是希望x态传播出来。
+4. 针对RR-13，来自idu的fresh请求，如果创建lrq（lsu_lrq_create_vld=1）是发生dcache结构反压，同时tlbmiss且没有abort，并且rf栈有更老的请求；这种情况下，创建lrq是携带lrq_crate_frz=0，会满足重发条件，另外，此时lag_ex1_stall_restart_entry=12'b0，mmu不会记录该请求的lsid，不会重复对其进行唤醒。
+5. 针对RR-14，设计上能够确保lrq的创建和mmu的唤醒不会同拍，如果lrq创建的时候，请求满足被mmu立即唤醒，唤醒信号会打一拍给lrq；
+6. 针对4.2的最后一条，来自sq模块的sq未满唤醒型号对于lsu2和lsu3具有同样的意义，如果两个lane中lrq队列中存在lrq项等待sq有余项唤醒，那么lsu2_lrq_exx_sq_not_full需要唤醒两个lane中所有等待sq有余项的请求。
+7. 针对5.1，mmu正式accept条件是发起mmu请求（lsu_mmu_va_vld）并没有abort(lsu_mmu_abort)，当拍记录mmu的miss队列，下一拍生效。
+8. 针对5.2 lsu_mmu_abort不能追溯取消
+9. 针对5.3 回答同针对RR-13的回答
+10. 针对5.4 回答同针对RR-14的回答
+11. 针对5.5 回答同针对RR-08的回答
+12. 针对5.6 回答同针对RR-11的回答
+13. 针对5.7 no_spec_exist在进入lsu流水线之后，我们确实把这个信号的语义挪为他用
+14. 针对5.8 设计明确LRQENTRY==LSIQENTRY、PC_LEN==15、VMBENTRY==8 和 9-bit split number
+15. 针对5.9 dcache_arb_lag_ex1_sel表示lag流水新没有被借用，lag请求可以访问dcache，即表示选择也表示接受；
+16. 针对5.10 pfu_part_empty tie 0，不会恢复真是empty，应该是放松的钟控，不会有功能上的问题吧？
 ***
 请基于以上部分澄清，继续检查潜在的设计bug。
