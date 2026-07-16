@@ -2163,6 +2163,7 @@ begin
   {1'b0, 1'b1, 1'b0}: lag_ldc_ex1_bytes_vld1 = ld_ag_bytes_vld1[15:0]  & vector_byte_mask[15:0]; // not-replay vls and not us
   {1'b0, 1'b1, 1'b1}: lag_ldc_ex1_bytes_vld1 = lag_us_bytes_vld[31:16]; // not-replay us
   {1'b0, 1'b0, 1'b?}: lag_ldc_ex1_bytes_vld1 = ld_ag_bytes_vld1; // not replay not vls
+  default:            lag_ldc_ex1_bytes_vld1 = {16{1'bx}};
   endcase
 end
 
@@ -3032,7 +3033,7 @@ assign lsu_lrq_create_vld = lag_ex1_inst_vld
                             && !lag_lrq_create_already;
                             // && !lag_ex1_stall_ori;
 // assign lsu_lrq_create_va            = ld_ag_va[63:0];
-assign lsu_lrq_create_frz           = !(lag_ex1_stall_ori && ld_ag_stall_mask);
+assign lsu_lrq_create_frz           = !(lag_ex1_stall_ori && ld_ag_stall_mask && (mmu_lsu_pa_vld || lsu_mmu_abort));
 assign lsu_lrq_create_wait_old_chk  = ld_ag_atomic_no_cmit_restart_arb;
 assign lsu_lrq_create_bar_chk       = ld_ag_not_replay_bar_chk;// lsu has bar
 assign lsu_lrq_create_no_spec_chk   = ld_ag_not_replay_no_spec_chk;
