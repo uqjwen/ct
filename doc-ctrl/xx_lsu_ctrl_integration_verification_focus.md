@@ -1,0 +1,53 @@
+# `xx_lsu_ctrl` / `xx_lsu_top` 集成重点验证方案
+
+## 1. 时钟与 epoch scoreboard
+
+为每个父/子门控时钟记录 enable reason；每个 LRQ/LSIQ entry 记录 `{lane, entry, generation, freeze_reasons}`。所有 wakeup 必须只清除同 generation 的对应 reason，所有 clocked update 必须有父时钟覆盖。
+
+## 2. 必跑用例
+
+| ID | 激励 | 必查结果 |
+|---|---|---|
+| CTRL-V01 | special clock 当前配置及恢复真实 `pfu_part_empty` 两种模式 | 当前常开；门控模式下 VMB0/1、ICC→VB、LD/LSDA special 事件都开父时钟 |
+| CTRL-V02 | lane0/2/3 各类 restart/wakeup 单独和同拍组合 | 只修改目标 lane/entry，OR 合并不丢 reason |
+| CTRL-V03 | flush 后立刻复用 entry，再注入旧 MMU/LFB/SQ/WMB wakeup | 旧 generation 不清除新事务 freeze |
+| CTRL-V04 | `LRQENTRY/LSIQENTRY` 相等与刻意不等配置 | 正式配置通过；不等配置在 elaboration/static assertion 失败 |
+| CTRL-V05 | load/LS0/LS1 的 request、WB 和 borrow 事件覆盖 | 每个 sequential consumer 的父 pipe clock在需要拍开启；LS1 borrow 保持配置 tie 0 |
+| CTRL-V06 | LRQ mode 的 old IDU 输出、internal CTRL→LRQ 状态 | 外部 IDU 不依赖 tie-0 信号；LRQ freeze/replay 完整替代旧路径 |
+| CTRL-V07 | 所有可见 module/entry instance 重新运行 named-port 检查 | 端口集合、重复端口、参数宽度合同全部通过 |
+
+## 3. 关键断言
+
+```systemverilog
+a_special_child_covered:
+assert property (@(posedge forever_cpuclk)
+  (idu_lsu_vmb_create0_gateclk_en || idu_lsu_vmb_create1_gateclk_en ||
+   icc_vb_create_gateclk_en || lsda0_ex3_special_gateclk_en ||
+   lsda1_ex3_special_gateclk_en) |-> lsu_special_clk_en);
+
+a_lrq_lsiq_same_depth:
+initial assert (LRQENTRY == LSIQENTRY);
+
+a_wakeup_epoch_live:
+assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
+  |lsu0_idu_exx_wakeup |-> wakeup_epoch0 == active_entry_epoch0);
+
+a_ls1_borrow_tied_off:
+assert property (@(posedge forever_cpuclk)
+  !lsdc1_ex2_borrow_vld && !lsda1_ex3_borrow_vld);
+
+a_pipe_update_has_parent_clock:
+assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
+  any_ld0_sequential_update |-> ctrl_ld0_clk_en);
+```
+
+## 4. 结构检查清单
+
+- 对 module header 和每个 named-port instance 做集合相等检查。
+- 对 generate entry 检查每个实例的 port set 相同。
+- 对 top 中间 net检查 producer 数、consumer 数和参数化宽度。
+- 在完整源码环境补跑预处理、lint、elaboration、CDC/RDC 和 clock-gating check。
+
+## 5. Sign-off
+
+父/子时钟覆盖 assertion 0 failure；旧 epoch wakeup 0 次生效；lane0/2/3 全来源交叉覆盖；LRQ mode 外部合同和参数相等合同书面确认；完整环境 elaboration 通过后方可最终签核。
