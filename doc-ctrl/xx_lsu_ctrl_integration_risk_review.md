@@ -2,13 +2,13 @@
 
 ## 1. 范围与结论
 
-审查提交 `9928a13` 的全局/pipe 门控时钟、LRQ 迁移后的 restart/wakeup bitmap、flush/参数合同和所有已提供模块的 named-port 连接。仓库缺少大量被 top 实例化的模块、宏头文件和 helper，因此本次只能完成 source-level 结构审查，不能声称已完整 elaboration。
+基于提交 `a81c012` 复核全局/pipe 门控时钟、LRQ 迁移后的 restart/wakeup bitmap、flush/参数合同和所有已提供模块的 named-port 连接。仓库缺少大量被 top 实例化的模块、宏头文件和 helper，因此本次只能完成 source-level 结构审查，不能声称已完整 elaboration。
 
 | ID | 优先级 | 置信度 | 状态 | 摘要 |
 |---|---:|---|---|---|
-| CTRL-RR-01 | P1 | 已确认 | 当前配置条件关闭 | special-clock enable 遗漏 4 个输入并重复 `vmb_create0` |
-| CTRL-RR-02 | P1 | 已给定配置 | 开放待静态保护 | CTRL→LRQ bitmap 要求 `LRQENTRY == LSIQENTRY` |
-| CTRL-RR-03 | P1 | 合同依赖 | 开放待 epoch 断言 | 多来源 wakeup 仅按 entry bitmap OR，外部迟到事件可命中复用 entry |
+| CTRL-RR-01 | P2 | 已确认 | VMB 笔误已修，剩余遗漏当前配置关闭 | create1 已补；ICC/LSDA special enable 仍未进入父门控 |
+| CTRL-RR-02 | P1 | 已给定合同 | 条件关闭待静态保护 | CTRL→LRQ bitmap 要求 `LRQENTRY == LSIQENTRY` |
+| CTRL-RR-03 | P1 | 源码+合同 | 可见 DA 路径关闭，外部 producer 条件关闭 | 多来源 wakeup 仅按 entry bitmap OR，完整签核仍需 epoch 断言 |
 | CTRL-RR-04 | P2 | 已给定配置 | 迁移边界 | top 对外 IDU 状态多数 tie 0，内部状态改送 LRQ |
 | CTRL-RR-05 | P3 | 结构确认 | 工具边界 | 已提供 13 个 instance 的 named-port 集合一致，但不等于完整编译成功 |
 
@@ -20,21 +20,23 @@
 
 ### CTRL-RR-01：special-clock enable 清单不完整
 
-`lsu_special_clk_en` 尾部把 `idu_lsu_vmb_create0_gateclk_en` 写了两次（`srcs/xx_lsu_ctrl.sv:539-556`），而模块输入中的 `idu_lsu_vmb_create1_gateclk_en`、`icc_vb_create_gateclk_en`、`lsda0_ex3_special_gateclk_en` 和 `lsda1_ex3_special_gateclk_en` 在整个 CTRL 中均没有消费者。top 确实把这些真实信号接入 CTRL（`srcs/xx_lsu_top.sv:12119-12132`、`srcs/xx_lsu_top.sv:12305-12323`）。
+Interaction 1.3 提交已把尾部重复的 `idu_lsu_vmb_create0_gateclk_en` 修为 `idu_lsu_vmb_create1_gateclk_en`（`srcs/xx_lsu_ctrl.sv:539-556`），VMB0/1 均已覆盖。继续扫描发现 `icc_vb_create_gateclk_en`、`lsda0_ex3_special_gateclk_en` 和 `lsda1_ex3_special_gateclk_en` 仍在整个 CTRL 中没有消费者，而 top 确实把这些真实信号接入 CTRL（`srcs/xx_lsu_top.sv:12119-12132`、`srcs/xx_lsu_top.sv:12305-12323`）。
 
-当前 top 把 `pfu_part_empty=0`（`srcs/xx_lsu_top.sv:3761`），所以 `!pfu_part_empty` 让 special clock 永久在线，遗漏暂不造成功能丢拍；代价是门控失效。若未来恢复 PFU empty 的真实值，VMB create1、ICC→VB create 或 LSDA 特殊寄存可能在唯一事件拍关钟。恢复门控前必须补齐 enable 清单，并断言每个 special-clock 子门控请求都蕴含父时钟 enable。
+当前 top 把 `pfu_part_empty=0`（`srcs/xx_lsu_top.sv:3761`），所以 `!pfu_part_empty` 让 special clock 永久在线，剩余遗漏暂不造成功能丢拍；代价是门控失效。若未来恢复 PFU empty 的真实值，ICC→VB create 或 LSDA 特殊寄存可能在唯一事件拍关钟。恢复门控前必须补齐这 3 个 enable，并断言每个 special-clock 子门控请求都蕴含父时钟 enable。
 
 ### CTRL-RR-02：LRQ/LSIQ 参数相等是隐藏硬合同
 
 top 默认 `LRQENTRY=LSIQENTRY`（`srcs/xx_lsu_top.sv:27-42`），但 CTRL 输出是 `LSIQENTRY` 宽，LRQ 的 freeze/restart/status 输入是 `LRQENTRY` 宽（`srcs/xx_lsu_lrq.sv:249-268`）。top 使用 `LRQENTRY` 宽中间 net把 CTRL 输出直接接入 LRQ（`srcs/xx_lsu_top.sv:3779-3789`、`srcs/xx_lsu_top.sv:12388-12445`）。
 
-只要两个参数被独立改写，就会发生静默截断/零扩展，且 bitmap 的 bit identity 不再有定义。应在 top/CTRL 加 elaboration-time static assertion `LRQENTRY == LSIQENTRY`，或把接口统一参数化为 LRQENTRY 并显式映射。
+Interaction 1.3 已把 `LSIQENTRY == LRQENTRY` 明确为集成合同，因此正式配置下功能条件关闭。只要两个参数被独立改写，仍会发生静默截断/零扩展，且 bitmap 的 bit identity 不再有定义；应在 top/CTRL 加 elaboration-time static assertion，避免合同只存在于文字中。
 
 ### CTRL-RR-03：wakeup bitmap 缺少 transaction epoch
 
 CTRL 将 RF restart、DC immediate、DA second/ECC、SQ/WMB dependency、MMU async、US restart 和 LFB dependency直接 OR 成 lane bitmap（`srcs/xx_lsu_ctrl.sv:949-989`）。这能保持同拍优先级简单，但信号只携带 entry bit，不携带 IID/epoch。
 
-如果 MMU/LFB/SQ/WMB 的异步事件在 LSIQ/LRQ entry 释放并复用后迟到，就可能解除新事务的 freeze。必须在每个 producer 侧保证“bitmap只针对仍活动的同一 entry epoch”，或在 consumer 侧携带 generation tag；系统级 scoreboard 应对 flush+复用+迟到 wakeup 做负向注入。
+Interaction 1.3 声明 entry bit 在请求 DA 终止/不再重发前唯一对应 IID，flush 时 producer 会删除旧 pending。可见 LD-DA 路径确实以 `lda_ex3_inst_vld` 和保存的 LSID 生成 already-da/pop/spec-fail/secd 向量（`srcs/xx_lsu_ld_da.sv:5167-5223`），且 full/check flush 会清 DA stage valid（`srcs/xx_lsu_ld_da.sv:1981-2012`），未发现该路径违反规则。
+
+但 MMU/LFB/SQ/WMB producer 不在仓库中，consumer 仍只是无 IID/epoch 的 bitmap OR，`tlb_busy` 甚至直接按 bit wake 清除（`srcs/xx_lsu_lrq_entry.sv:694-705`）。因此本项只能按合同条件关闭，不能源码关闭；必须在每个缺失 producer 侧证明“bitmap只针对仍活动的同一 entry epoch”，并用 flush+复用+迟到 wakeup 负向注入验证。
 
 ### CTRL-RR-04：top 的 IDU 接口已迁移到 LRQ 语义
 
@@ -48,7 +50,7 @@ top 对外多个旧 `lsu*_idu_*` backpressure/status 输出固定为 0，wakeup/
 
 ## 4. 处理顺序
 
-现配置首先应保留 `pfu_part_empty=0` 的显式配置断言；若要恢复时钟门控，先修 CTRL-RR-01。随后固化 `LRQENTRY==LSIQENTRY` 和所有异步 wakeup 的 epoch 合同，并在完整 SoC 源码环境运行 lint/elaboration。
+现配置首先应保留 `pfu_part_empty=0` 的显式配置断言；若要恢复时钟门控，补齐 ICC/LSDA 三个 enable。随后固化 `LRQENTRY==LSIQENTRY` 和所有异步 wakeup 的 epoch 合同，并在完整 SoC 源码环境运行 lint/elaboration。
 
 ## 5. 跨报告对应关系
 

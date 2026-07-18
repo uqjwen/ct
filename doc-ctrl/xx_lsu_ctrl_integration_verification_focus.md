@@ -8,9 +8,9 @@
 
 | ID | 激励 | 必查结果 |
 |---|---|---|
-| CTRL-V01 | special clock 当前配置及恢复真实 `pfu_part_empty` 两种模式 | 当前常开；门控模式下 VMB0/1、ICC→VB、LD/LSDA special 事件都开父时钟 |
+| CTRL-V01 | special clock 当前配置及恢复真实 `pfu_part_empty` 两种模式 | 当前常开；VMB0/1 已由源码覆盖；门控模式下 ICC→VB、LD/LSDA special 事件也必须开父时钟，当前 RTL 应暴露剩余遗漏 |
 | CTRL-V02 | lane0/2/3 各类 restart/wakeup 单独和同拍组合 | 只修改目标 lane/entry，OR 合并不丢 reason |
-| CTRL-V03 | flush 后立刻复用 entry，再注入旧 MMU/LFB/SQ/WMB wakeup | 旧 generation 不清除新事务 freeze |
+| CTRL-V03 | flush 后立刻复用 entry，再分别注入旧 MMU/LFB/SQ/WMB wakeup；同时覆盖可见 DA already-da/secd/spec-fail/pop | 缺失 producer 的旧 generation 不清除新事务 freeze；DA 向量均来自 live stage/保存 LSID |
 | CTRL-V04 | `LRQENTRY/LSIQENTRY` 相等与刻意不等配置 | 正式配置通过；不等配置在 elaboration/static assertion 失败 |
 | CTRL-V05 | load/LS0/LS1 的 request、WB 和 borrow 事件覆盖 | 每个 sequential consumer 的父 pipe clock在需要拍开启；LS1 borrow 保持配置 tie 0 |
 | CTRL-V06 | LRQ mode 的 old IDU 输出、internal CTRL→LRQ 状态 | 外部 IDU 不依赖 tie-0 信号；LRQ freeze/replay 完整替代旧路径 |
@@ -50,4 +50,4 @@ assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
 
 ## 5. Sign-off
 
-父/子时钟覆盖 assertion 0 failure；旧 epoch wakeup 0 次生效；lane0/2/3 全来源交叉覆盖；LRQ mode 外部合同和参数相等合同书面确认；完整环境 elaboration 通过后方可最终签核。
+父/子时钟覆盖 assertion 0 failure；旧 epoch wakeup 0 次生效；lane0/2/3 全来源交叉覆盖；VMB 修正和 ICC/LSDA 剩余门控项均验证；LRQ mode 外部合同和参数相等合同书面确认；完整环境 elaboration 通过后方可最终签核。

@@ -9,10 +9,10 @@
 | ID | 激励 | 必查结果 |
 |---|---|---|
 | RB-V01 | 普通区 0/1/2/3 空位及 MMU 保留位，三 lane create 全组合 | 每个 success 有唯一 pointer；普通请求不占 MMU 保留位；无 accept-zero-pointer |
-| RB-V02 | 刻意使 lane2 `dp_vld/judge_vld/create_vld` 不同，lane3 同拍请求 | 若组合不合法立即触发接口断言；合法组合 pointer不丢失/碰撞 |
+| RB-V02 | 0/1/2/3 个空位，三 lane 的 `judge/dp/vld` 合法及非法组合；高优先级 dp 有效但 create 失败 | 合同非法组合立即报错；任一低优先级成功 entry 的 payload/IID 必来自该 winner，不被更高优先级 dp 污染 |
 | RB-V03 | 每个状态注入 partial/full/async flush | request 前立即 kill；request 后旧 response被吸收或取消；旧 epoch 不击中新 entry |
-| RB-V04 | cacheable、NC、SO、atomic、sync、fence 的 R/B 顺序排列 | state 只在本 request满足完成条件后迁移；无提前 B 命中 |
-| RB-V05 | US 两 beat正常、缺 beat、多 beat、错 ID、错误 response | 正式协议只接受 beat0/beat1+last；负向激励触发断言 |
+| RB-V04 | cacheable、NC、SO、atomic、sync、fence 的 R/B 顺序排列；共享 B ID 前导噪声负向注入 | 合法环境不存在前导无关 B；负向注入触发 ownership assertion，state 不得提前完成 |
+| RB-V05 | US 两 beat正常、缺 beat、多 beat、错 ID、错误 response；CA=0/SO 的 US 请求 | 合法请求严格 beat0/beat1；非法属性在进入 RB 前报 `access_fault_with_page`；协议负向激励触发断言 |
 | RB-V06 | boundary first/merge/secd，各 beat bus error | 数据 merge、byte mask、exception、mtval、一次 completion/data 正确 |
 | RB-V07 | FOF first/non-first element bus error，vmew 全组合 | first 产生 exception且不写数据；non-first更新 VL/vstart并按合同完成 |
 | RB-V08 | WB completion 与 data grant反压 0/1/N 拍，多 entry 同时 ready | one-hot公平仲裁；payload/IID不串项；entry只释放一次 |
@@ -30,6 +30,28 @@ assert property (@(posedge lsu_special_clk) disable iff (!cpurst_b)
   !(|(rb_entry_ld0_create_vld & rb_entry_ls0_create_vld)) &&
   !(|(rb_entry_ld0_create_vld & rb_entry_ls1_create_vld)) &&
   !(|(rb_entry_ls0_create_vld & rb_entry_ls1_create_vld)));
+
+// 对每个 entry i 复制。低优先级 winner 不得被更高优先级 dp 抢 payload。
+a_ls0_winner_owns_payload:
+assert property (@(posedge lsu_special_clk) disable iff (!cpurst_b)
+  rb_entry_ls0_create_vld[i]
+  |-> rb_entry_ls0_create_dp_vld[i] && !rb_entry_ld0_create_dp_vld[i]);
+
+a_ls1_winner_owns_payload:
+assert property (@(posedge lsu_special_clk) disable iff (!cpurst_b)
+  rb_entry_ls1_create_vld[i]
+  |-> rb_entry_ls1_create_dp_vld[i] &&
+      !rb_entry_ld0_create_dp_vld[i] && !rb_entry_ls0_create_dp_vld[i]);
+
+a_lsda0_create_vld_has_dp:
+assert property (@(posedge lsu_special_clk) disable iff (!cpurst_b)
+  lsda0_rb_ex3_create_vld |-> lsda0_rb_ex3_create_dp_vld);
+
+a_lsda0_dp_has_judge:
+assert property (@(posedge lsu_special_clk) disable iff (!cpurst_b)
+  lsda0_rb_ex3_create_dp_vld |-> lsda0_rb_ex3_create_judge_vld);
+
+// LSDA1 复制同样两条蕴含断言。
 
 a_b_resp_owned:
 assert property (@(posedge lsu_special_clk) disable iff (!cpurst_b)
@@ -52,4 +74,4 @@ assert property (@(posedge lsu_special_clk) disable iff (!cpurst_b)
 
 ## 4. Sign-off
 
-所有状态边、request 类型、flush 点、response 排列和容量边界均覆盖；旧 epoch response 0 次；create/WB one-hot assertion 0 failure；ECC 配置和固定 ID 串行合同书面确认后方可签核。
+所有状态边、request 类型、flush 点、response 排列和容量边界均覆盖；旧 epoch response 0 次；create winner/payload identity 与 WB one-hot assertion 0 failure；RTU/LFB ownership、BIU US 两拍、非法属性错误映射及 WMB 固定 ID 串行合同书面确认后方可签核。

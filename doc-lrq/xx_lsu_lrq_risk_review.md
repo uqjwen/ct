@@ -2,15 +2,15 @@
 
 ## 1. 范围与结论
 
-本轮基于提交 `9928a13`，审查三组独立 LRQ bank 的 create、freeze、wakeup、issue、pop、flush、age-vector 和 replay payload，并沿 `xx_lsu_top` 追到 AG/controller。当前仓库没有仿真清单、helper、IDU、MMU 或 SFP 源码，因此合同项不能由本仓库单独关闭。
+本轮基于提交 `a81c012`，复核三组独立 LRQ bank 的 create、freeze、wakeup、issue、pop、flush、age-vector 和 replay payload，并沿 `xx_lsu_top` 追到 AG/DC/DA/controller。当前仓库没有仿真清单、helper、IDU、MMU、LFB、SQ、WMB 或 SFP 源码，因此外部所有权合同不能由本仓库单独证明。
 
 未发现三 bank 之间的直接分配碰撞：每个 bank 有独立 valid/free pointer，跨 bank 只共享全局年龄关系。保留 1 个已确认调试功能问题、2 个合同依赖的事务风险和 2 个清理/配置问题。
 
 | ID | 优先级 | 置信度 | 状态 | 摘要 |
 |---|---:|---|---|---|
 | LRQ-RR-01 | P2 | 已确认 | 开放 | replay 未保存 `halt_info`，AG 改取当前 IDU 总线 |
-| LRQ-RR-02 | P1 | 合同依赖 | 条件关闭 | create 在 full 时没有本地拒绝，且 raw create 仍可 pop IDU |
-| LRQ-RR-03 | P1 | 合同依赖 | 条件关闭 | flush 后 LRQ bit 复用依赖 MMU 同步删除旧 pending/wakeup |
+| LRQ-RR-02 | P1 | 合同依赖 | 条件关闭待断言 | no-space 预留和 flush 同步 kill 保证 create/pop 原子性 |
+| LRQ-RR-03 | P1 | 源码+合同 | 条件关闭待完整 producer | 可见 DA 路径未违约；MMU/LFB/SQ/WMB 仍需 epoch 证明 |
 | LRQ-RR-04 | P3 | 已确认 | 清理项 | 条件 payload 在非 US create 时保留上个 entry 的旧值 |
 | LRQ-RR-05 | P3 | 已给定配置 | 约束项 | 多处表达式要求 `LRQENTRY>=LSIQENTRY`，正式配置又要求二者相等 |
 
@@ -33,11 +33,19 @@ LRQ entry 的 create payload 与 read payload覆盖地址、IID、PC、寄存器
 
 `lrq*_create_success` 只检查 create 与 flush，不检查 `lrq*_full`（`srcs/xx_lsu_lrq.sv:1444-1474`）。full 时 free pointer 为全 0，因而 create vector 为 0；与此同时 IDU pop 使用 raw `lsu*_lrq_create_vld`（`srcs/xx_lsu_lrq.sv:1692-1708`）。如果上游在 full 拍产生 create，请求会被 pop 却没有 entry 接收。
 
-正常路径用 `lrq*_no_space` 阻止 RF issue（`srcs/xx_lsu_lrq.sv:1628-1683`），所以本项可按“任何 create 都来自先前被容量检查接受的唯一事务”条件关闭。但必须断言 `lsu*_lrq_create_vld |-> |lrq*_create_ptr0`，并把 pop 改为 `create_success` 会更稳健。
+正常路径用 `lrq*_no_space` 阻止 RF issue（`srcs/xx_lsu_lrq.sv:1628-1683`），Interaction 1.3 又明确 fresh 请求在进入 AG 前已经预留容量，所以本项可按“任何 create 都来自先前容量检查接受的唯一事务”条件关闭。create-success 相比 raw create 只额外过滤 full/check flush；IDU pop 仍用 raw create（`srcs/xx_lsu_lrq.sv:1692-1708`），因此 flush 同拍依赖上游对应项也被同一 flush 无效化。必须断言 `raw create && !flush -> onehot(ptr)`、`raw create && flush -> upstream killed`；把 IDU pop 直接收敛到真实 create-accept 仍会更稳健。
 
 ### LRQ-RR-03：旧 MMU wakeup 与 entry 复用
 
-entry 只按 bit 接受 controller/MMU wakeup（`srcs/xx_lsu_lrq_entry.sv:695-704`、`srcs/xx_lsu_lrq_entry.sv:769-822`），没有 generation/epoch。full/partial flush 又会直接清 valid，随后该 bit 可再次分配。因此 correctness 依赖 interaction 1.1.2 的外部合同：MMU 在 bit 复用前删除匹配 pending，且被 kill lsid 永不产生迟到 async wakeup。当前仓库无 MMU 源码，需在集成层用 `{lane, lrqid, flush_epoch}` scoreboard 证明。
+entry 只按 bit 接受 controller/MMU wakeup（`srcs/xx_lsu_lrq_entry.sv:695-705`、`srcs/xx_lsu_lrq_entry.sv:769-822`），没有 generation/epoch；full/partial flush 清 valid 后该 bit 可再次分配。Interaction 1.3 已明确 MMU 在 flush 时删除旧 pending，且 entry bit 在事务 DA 终止/不再重发前唯一对应 IID。
+
+本轮逐一检查可见实现，没有发现违反该守则的本地路径：
+
+- DA 的 already-da、pop、spec-fail、secd 均由 live `lda_ex3_inst_vld` 与保存的 LSID 形成 one-hot/bitmap（`srcs/xx_lsu_ld_da.sv:5167-5223`）；full/check flush 会清 DA stage valid（`srcs/xx_lsu_ld_da.sv:1981-2012`）。
+- DA pop entry 本身已由 `pop_vld` 掩码（`srcs/xx_lsu_ld_da.sv:5195-5202`），LRQ 虽直接使用 vector bit清 valid（`srcs/xx_lsu_lrq.sv:1059`、`srcs/xx_lsu_lrq_entry.sv:485-495`），不会看到未资格化的 LD pop。
+- 新 create 在 LRQ entry valid 更新中优先于 pop；allocator 又按拍前 valid 选空项，所以正常 live pop 不会同拍复用其 entry（`srcs/xx_lsu_lrq_entry.sv:485-495`）。
+
+需要注意，LRQ 的“释放”条件在源码中是 DA terminal/non-restart pop，而不是直接检查 `lda_lwb_ex3_cmplt_req`；这符合“通过 DA、不再重发”的解释，但不应误写成所有类型都必须先看到 WB completion。MMU/LFB/SQ/WMB producer 仍缺失，且 `tlb_busy` 对 wake bit 没有 local IID/valid 保护，因此只能按合同条件关闭，并用 `{lane, lrqid, IID, flush_epoch}` scoreboard 证明。
 
 ### LRQ-RR-04：非适用 payload 保留旧 entry 数据
 
@@ -54,6 +62,6 @@ replay lch entry 用 `{{LRQENTRY-LSIQENTRY{1'b0}}, ...}` 扩展（`srcs/xx_lsu_l
 ## 5. 修正顺序
 
 1. 补齐 LRQ-RR-01 `halt_info`。
-2. 将 IDU pop 和 age update 收敛到真实 `create_accept`，并增加 create-pointer 非零断言。
-3. 在 MMU/SFP 完整工程绑定 flush epoch、no-spec 所有权和 vector helper 等价断言。
+2. 将 IDU pop 和 age update 收敛到真实 `create_accept`，并增加容量预留/flush-kill 断言。
+3. 在 MMU/LFB/SQ/WMB/SFP 完整工程绑定 flush epoch、entry-bit/IID 所有权和 no-spec 合同。
 4. 清零条件 payload并增加参数静态检查。

@@ -2,7 +2,7 @@
 
 ## 1. 范围与结论
 
-审查提交 `9928a13` 的 DC→DA 流水、D-cache/TCM/forward 数据选择、ECC stall/replay、RB create/merge、completion/data writeback、vector/FOF、prefetch 与 debug cancel。缺失的 SQ/WMB/VMB/MCIC 行为按合同依赖分类。
+基于提交 `a81c012` 复核 DC→DA 流水、D-cache/TCM/forward 数据选择、ECC stall/replay、RB create/merge、completion/data writeback、vector/FOF、prefetch 与 debug cancel。缺失的 SQ/WMB/VMB/MCIC 行为按合同依赖分类。
 
 | ID | 优先级 | 置信度 | 状态 | 摘要 |
 |---|---:|---|---|---|
@@ -44,6 +44,18 @@ debug bit0 被并入 `ld_da_expt_vld_cancel`/`ld_da_expt_ori_cancel`（`srcs/xx_
 
 源中仍有面向仿真的 `2'b??` case 模式（`srcs/xx_lsu_ld_da.sv:3495-3496`），以及把 `256'b0` 赋给 64-bit 目标的写法（`srcs/xx_lsu_ld_da.sv:5250-5251`）。功能上零截断无差异，但综合/lint 策略若禁止 wildcard-X 或宽度不匹配，应统一为显式合法编码和目标宽度常量；非法 `vmew/rot_sel` 应用 assertion 报错，不应只传播 X。
 
-## 4. 已排除项
+## 4. Interaction 1.3 问题 17：DA 分析位置与新增交叉复核
+
+`xx_lsu_ld_da` 的独立分析一直位于本文件，验证方案位于同目录的 `xx_lsu_ld_da_verification_focus.md`。此前结果并非缺失：已确认 DA-RR-01 的 ECC replay 第 4 块错误、DA-RR-02 的 SQ-forward ECC 策略 tie-off、DA-RR-03 的 RB accept 合同、DA-RR-04 的 debug 辅助副作用资格化和 DA-RR-05 的 X/宽度清理项。
+
+针对 Interaction 1.3 再补三条跨模块结论：
+
+1. **RB create/payload：** DA 的 `create_judge_vld`、unmasked dp 和真实 create 分层清晰（`srcs/xx_lsu_ld_da.sv:3515-3543`、`srcs/xx_lsu_ld_da.sv:3597-3605`）。dp 可能因 ECC/discard 最终不 create，但 RB per-entry dp 还会经过 pointer/`!full`，没有复现低优先级 winner 被 DA payload 污染；DA-RR-03 仍要求 accept-or-restart identity。
+2. **WB req/dp/gate：** 源码证明 `req -> dp -> gateclk_en`，所以不存在 `req=1 && dp=0` 的数据源错选；但 ECC/data-check/SQ-discard 可形成 dp-only，WB 会据此屏蔽低优先级 requester（`srcs/xx_lsu_ld_da.sv:4986-5024`、`srcs/xx_lsu_ld_wb.sv:794-812`）。该状态不产生伪 writeback，却必须有界并保证 loser hold。
+3. **LQ/LRQ 生命周期：** LQ restart-pop 只由 live DA + saved LQ pointer 生成（`srcs/xx_lsu_ld_da.sv:4873-4877`）；LRQ already-da/pop/spec-fail/secd 也都由 live DA + saved LSID 生成（`srcs/xx_lsu_ld_da.sv:5167-5223`）。full/check flush 会清 DA stage valid，未发现可见 LD 路径在 flush 后继续发旧 pop/wakeup。
+
+这些结论没有关闭 DA-RR-01/02/04 的既有问题；特别是 DA-RR-01 仍是本模块最高优先级的确定数据破坏。
+
+## 5. 已排除项
 
 DC 的 ahead-WB valid 不会在 restart 时误入 DA，因为 DA 锁存受 `ldc_lda_ex2_inst_vld` 资格化。常规 exception/restart 也同时屏蔽 completion/data request。当前最高优先级是 DA-RR-01 的确定数据破坏，其次确认 SQ-forward/ECC 合同。
