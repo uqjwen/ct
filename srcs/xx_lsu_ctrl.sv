@@ -553,7 +553,7 @@ assign lsu_special_clk_en = lda0_ex3_special_gateclk_en
                             || lm_lfb_depd_wakeup2
                             || lm_lfb_depd_wakeup3
                             || idu_lsu_vmb_create0_gateclk_en
-                            || idu_lsu_vmb_create0_gateclk_en;
+                            || idu_lsu_vmb_create1_gateclk_en;
 gated_clk_cell  x_lsu_special_clk (
   .clk_in             (forever_cpuclk    ),
   .clk_out            (lsu_special_clk   ),
