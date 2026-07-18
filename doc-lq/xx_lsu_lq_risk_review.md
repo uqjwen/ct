@@ -2,13 +2,13 @@
 
 ## 1. 范围与结论
 
-基于提交 `a81c012` 复核三路 LQ create、entry commit/restart pop、partial/full flush、RAR/RAW 地址比较、snoop 标记、age-vector 和 SFP spec-fail PC。Interaction 1.3 关闭了 3 个正确性疑问，但保留 raw create 的保守阻塞、参数和 epoch 断言。
+基于提交 `a81c012` 完成初审，并在 Interaction 1.4 提交 `6260f4a` 上复核三路 LQ create、entry commit/restart pop、partial/full flush、RAR/RAW 地址比较、snoop 标记、age-vector 和 SFP spec-fail PC。新增 LSDA DC/DA 源码关闭了此前的 producer 缺失，但仍保留 raw create 的保守阻塞、参数和 epoch 断言。
 
 | ID | 优先级 | 置信度 | 状态 | 摘要 |
 |---|---:|---|---|---|
 | LQ-RR-01 | P3 | 已确认权衡 | 功能关闭，性能观察 | 多匹配返回最低物理 index PC，接受为 SFP 训练策略 |
 | LQ-RR-02 | P3 | 源码+合同 | 正确性关闭，性能项并入 RR-05 | winner 与高优先级 dp 不会在同 entry 冲突 |
-| LQ-RR-03 | P2 | 源码+合同 | 条件关闭 | 可见 LD 路径 flush 后不产生迟到 restart-pop；LSDA 路径待合同 |
+| LQ-RR-03 | P2 | 源码+合同 | 三 lane 源码关闭，epoch 断言保留 | LD/LSDA 都由 live DA 与 saved pointer 产生 restart-pop |
 | LQ-RR-04 | P3 | 已给定配置 | 约束项 | SFP PC 固定 15 bit，没有 `PC_LEN` 参数 |
 | LQ-RR-05 | P3 | 已确认 | 性能/清理 | flush-killed 前序 create 仍参与后续 lane 容量保留，可制造伪 full |
 
@@ -32,7 +32,7 @@ lane3 指针由 `lsdc0_lq_ex2_create_vld ? ptr3 : ptr2` 决定（`srcs/xx_lsu_lq
 
 - 只剩 1 项时，lane0/lane2 pointer 可重合，但只要 lane0 raw create 有效，lane2 success 就被 `lq_less2 && ldc0_lq_ex2_create_vld` 阻止；lane3 同理被前序 raw create 阻止（`srcs/xx_lsu_lq.sv:572-587`）。若高优先级被 partial flush 杀死，低优先级也保守重试，不会在同 entry 成功。
 - 剩 2 项且 lane2 raw create 有效时，lane3 使用与 ptr2 分离的 ptr3；若 ptr3 与 lane0 的 ptr0 重合，lane0+lane2 同时 raw valid 又会阻止 lane3 success。
-- 剩 3 项以上时三个 pointer 分离。可见 LD lane 的 `create_vld == create_dp_vld` 由 DC 源码直接保证（`srcs/xx_lsu_ld_dc.sv:1565-1580`）；LSDA0/1 producer 未提供，需合同保证相同关系。
+- 剩 3 项以上时三个 pointer 分离。LD lane 的 `create_vld == create_dp_vld` 由 DC 源码直接保证（`srcs/xx_lsu_ld_dc.sv:1565-1580`）；新增 LSDA DC 同样显式令主 create valid 等于 dp valid（`srcs/xx_lsu_ls_ld_dc.sv:1060-1088`）。
 
 因此没有出现“低优先级 create 成功但 entry 被高优先级失败 dp 写 payload”的正确性错误。剩余问题是被 flush-kill 的 raw create 仍会保守占容量，归入 LQ-RR-05；验证应断言每个真实 winner 的同 entry 高优先级 dp 为 0，而不能错误要求全部 dp vectors 永远 one-hot。
 
@@ -40,7 +40,7 @@ lane3 指针由 `lsdc0_lq_ex2_create_vld ? ptr3 : ptr2` 决定（`srcs/xx_lsu_lq
 
 `lq_entry_pop_vld` 对 commit hit 进行 valid 资格化，但三个 DA restart-pop one-hot 直接 OR 入（`srcs/xx_lsu_lq_entry.sv:345-375`），且 pop 优先于 create（`srcs/xx_lsu_lq_entry.sv:249-261`）。可见 LD 路径中，DC 只把真实 `lq_entry_create_vld` 保存到 DA（`srcs/xx_lsu_ld_dc.sv:1565-1608`），DA 又只在 live EX3 且 `restart_no_cache` 时生成 pop（`srcs/xx_lsu_ld_da.sv:4873-4877`）；full flush 和针对该 IID 的 check flush 会清掉 DA stage valid（`srcs/xx_lsu_ld_da.sv:1981-2012`）。此外 allocator 按拍前 valid 选空项，正在被 pop 的 live entry 同拍不会被 create pointer复用。
 
-因此可见 LD 路径没有 flush 后迟到 pop 吞新 create 的窗口。LSDA0/1 的 DC/DA 源码未提供，只能按同样的 `create accepted -> saved pointer -> live DA restart` 合同条件关闭；仍建议保留 `restart-pop -> live matching entry epoch` assertion。
+因此可见 LD 路径没有 flush 后迟到 pop 吞新 create 的窗口。Interaction 1.4 新增 LSDA DC/DA 后，可见其主 create 保存真实 pointer，restart-pop 也只由 live `lsda_ex3_inst_vld && ld_da_restart_no_cache` 产生（`srcs/xx_lsu_ls_ld_da.sv:4077-4083`）。三 lane 本地路径均可源码关闭；仍建议保留 `restart-pop -> live matching entry epoch` assertion，覆盖 wrapper/top 接线和 flush 同拍边界。
 
 ### LQ-RR-04：固定 PC 宽度
 

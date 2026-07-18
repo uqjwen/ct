@@ -11,7 +11,7 @@
 | RB-V01 | 普通区 0/1/2/3 空位及 MMU 保留位，三 lane create 全组合 | 每个 success 有唯一 pointer；普通请求不占 MMU 保留位；无 accept-zero-pointer |
 | RB-V02 | 0/1/2/3 个空位，三 lane 的 `judge/dp/vld` 合法及非法组合；高优先级 dp 有效但 create 失败 | 合同非法组合立即报错；任一低优先级成功 entry 的 payload/IID 必来自该 winner，不被更高优先级 dp 污染 |
 | RB-V03 | 每个状态注入 partial/full/async flush | request 前立即 kill；request 后旧 response被吸收或取消；旧 epoch 不击中新 entry |
-| RB-V04 | cacheable、NC、SO、atomic、sync、fence 的 R/B 顺序排列；共享 B ID 前导噪声负向注入 | 合法环境不存在前导无关 B；负向注入触发 ownership assertion，state 不得提前完成 |
+| RB-V04 | WMB sync/fence AW grant 前后、RB AR grant 前后排列 B response；共享 B ID 前导/迟到噪声负向注入 | WMB 本地 B-ID valid 只在 request 后成立；RB 只接受 live WAIT_RESP request epoch，负向注入触发 ownership assertion |
 | RB-V05 | US 两 beat正常、缺 beat、多 beat、错 ID、错误 response；CA=0/SO 的 US 请求 | 合法请求严格 beat0/beat1；非法属性在进入 RB 前报 `access_fault_with_page`；协议负向激励触发断言 |
 | RB-V06 | boundary first/merge/secd，各 beat bus error | 数据 merge、byte mask、exception、mtval、一次 completion/data 正确 |
 | RB-V07 | FOF first/non-first element bus error，vmew 全组合 | first 产生 exception且不写数据；non-first更新 VL/vstart并按合同完成 |

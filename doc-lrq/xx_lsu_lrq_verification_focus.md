@@ -17,7 +17,7 @@
 | LRQ-V07 | replay 同拍改变当前 IDU `halt_info` | replay 调试结果只来自原事务；当前 RTL应暴露 LRQ-RR-01 |
 | LRQ-V08 | no-spec 与 barrier 多 entry、跨 bank 年龄排列 | 只在真正的前序目标消失后 wake；不得形成 age-vector 环 |
 | LRQ-V09 | 可见 DA already-da/secd/spec-fail/pop 与 full/check flush 逐拍交叉 | 所有 bitmap 来自 live DA + saved LSID；flush 后零次迟到修改 |
-| LRQ-V10 | 缺失 MMU/LFB/SQ/WMB producer 的 flush→同 bit复用→旧 wake 负向注入 | 合法环境不产生旧 wake；强制旧 wake 立即触发 epoch/IID assertion |
+| LRQ-V10 | MMU/LFB/SQ/WMB 各 producer 执行 check/full flush→同 LRQ bit 复用→旧 wake 负向注入 | flush 拍只唤醒旧 epoch并同步清保存状态；复用后零次旧 wake，强制旧 wake 立即触发 epoch/IID assertion |
 
 ## 3. 关键断言
 
@@ -53,6 +53,16 @@ a_wakeup_epoch_matches:
 assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
   |lsu0_lrq_exx_tlb_wakeup |-> wake_epoch == txn_epoch);
 
+a_mmu_flush_consumes_saved_lsid:
+assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
+  rtu_ck_flush |=> !(|tmq_entry_lsid_for_flushed_epoch));
+
+a_lfb_sq_wmb_flush_clears_saved_wakeup:
+assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
+  rtu_ck_flush |=> !(|lfb_old_wakeup_queue ||
+                     |sq_old_wakeup_queue ||
+                     |wmb_old_wakeup_queue));
+
 a_rf_valid_has_data_clock:
 assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
   lrq_lsu0_rf_sel |-> lrq_lsu0_rf_gateclk_sel);
@@ -65,4 +75,4 @@ lane2/lane3 必须复制同类 assertion；参数层增加 `initial assert (LRQE
 - 覆盖 3 lanes × 8 freeze 原因 × `{0,1,N}` 等待 × 4 flush 点 × IID wrap。
 - 所有 bank 的 empty→full→empty、同拍三 create、同拍三 pop、create+pop 都命中。
 - 适用 replay payload X-prop 0 failure；旧 `no_spec` 只按 interaction 1.1.3 的 SFP/IDU 非消费合同检查。
-- LRQ-RR-01 修复，容量预留/flush-kill/accept-pop 一致，DA 本地 bitmap 所有权通过，缺失 producer 的旧 epoch wakeup 0 次，assertion 0 failure 后方可 sign-off。
+- LRQ-RR-01 修复，容量预留/flush-kill/accept-pop 一致，DA/MMU/LFB/SQ/WMB bitmap 所有权通过，旧 epoch wakeup 0 次，assertion 0 failure 后方可 sign-off。

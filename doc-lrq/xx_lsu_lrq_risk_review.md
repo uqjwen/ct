@@ -2,7 +2,7 @@
 
 ## 1. 范围与结论
 
-本轮基于提交 `a81c012`，复核三组独立 LRQ bank 的 create、freeze、wakeup、issue、pop、flush、age-vector 和 replay payload，并沿 `xx_lsu_top` 追到 AG/DC/DA/controller。当前仓库没有仿真清单、helper、IDU、MMU、LFB、SQ、WMB 或 SFP 源码，因此外部所有权合同不能由本仓库单独证明。
+本轮基于提交 `a81c012` 完成初审，并在 Interaction 1.4 提交 `6260f4a` 上复核三组独立 LRQ bank 的 create、freeze、wakeup、issue、pop、flush、age-vector 和 replay payload。新增 MMU/LFB/SQ/WMB/LSDA 源码已纳入 flush-epoch 追踪；仿真清单、helper、IDU/SFP 与完整集成 testbench 仍缺失。
 
 未发现三 bank 之间的直接分配碰撞：每个 bank 有独立 valid/free pointer，跨 bank 只共享全局年龄关系。保留 1 个已确认调试功能问题、2 个合同依赖的事务风险和 2 个清理/配置问题。
 
@@ -10,7 +10,7 @@
 |---|---:|---|---|---|
 | LRQ-RR-01 | P2 | 已确认 | 开放 | replay 未保存 `halt_info`，AG 改取当前 IDU 总线 |
 | LRQ-RR-02 | P1 | 合同依赖 | 条件关闭待断言 | no-space 预留和 flush 同步 kill 保证 create/pop 原子性 |
-| LRQ-RR-03 | P1 | 源码+合同 | 条件关闭待完整 producer | 可见 DA 路径未违约；MMU/LFB/SQ/WMB 仍需 epoch 证明 |
+| LRQ-RR-03 | P1 | 源码+合同 | 源码缩小，边界待断言 | MMU/LFB/SQ/WMB 本地 flush 后清 bitmap；LRQ 无 generation tag，仍需集成 epoch 证明 |
 | LRQ-RR-04 | P3 | 已确认 | 清理项 | 条件 payload 在非 US create 时保留上个 entry 的旧值 |
 | LRQ-RR-05 | P3 | 已给定配置 | 约束项 | 多处表达式要求 `LRQENTRY>=LSIQENTRY`，正式配置又要求二者相等 |
 
@@ -45,7 +45,13 @@ entry 只按 bit 接受 controller/MMU wakeup（`srcs/xx_lsu_lrq_entry.sv:695-70
 - DA pop entry 本身已由 `pop_vld` 掩码（`srcs/xx_lsu_ld_da.sv:5195-5202`），LRQ 虽直接使用 vector bit清 valid（`srcs/xx_lsu_lrq.sv:1059`、`srcs/xx_lsu_lrq_entry.sv:485-495`），不会看到未资格化的 LD pop。
 - 新 create 在 LRQ entry valid 更新中优先于 pop；allocator 又按拍前 valid 选空项，所以正常 live pop 不会同拍复用其 entry（`srcs/xx_lsu_lrq_entry.sv:485-495`）。
 
-需要注意，LRQ 的“释放”条件在源码中是 DA terminal/non-restart pop，而不是直接检查 `lda_lwb_ex3_cmplt_req`；这符合“通过 DA、不再重发”的解释，但不应误写成所有类型都必须先看到 WB completion。MMU/LFB/SQ/WMB producer 仍缺失，且 `tlb_busy` 对 wake bit 没有 local IID/valid 保护，因此只能按合同条件关闭，并用 `{lane, lrqid, IID, flush_epoch}` scoreboard 证明。
+Interaction 1.4 补齐的 producer 进一步缩小了本项：
+
+- MMU TMQ entry 保存 IID 与三 lane LSID；check-flush 会按 IID 清 entry/request，`rtu_ck_flush` 拍汇总所有 live LSID 发 wakeup，entry 内 LSID 同拍清零（`srcs/mmu/xx_mmu_dutlb_tmq_entry.sv:141-180`、`193-228`，`srcs/mmu/xx_mmu_dutlb_tmq.sv:593-601`）。
+- LFB 在 check-flush 拍输出保存与同拍新增 bitmap，下一拍清零；full flush 直接清零（`srcs/xx_lsu_lfb.sv:1543-1598`）。
+- SQ 与 WMB 的 global/data dependency queue 采用同类“flush 拍发送、下一拍清空”结构（`srcs/xx_lsu_sq.sv:2505-2576`、`srcs/xx_lsu_wmb.sv:3602-3633`、`3747-3777`）。
+
+因此没有发现这些 producer 在 flush 后继续保存旧 entry bit 的本地路径。需要注意，LRQ 的“释放”条件在源码中仍是 DA terminal/non-restart pop，而不是所有类型都先看到 WB completion；consumer 也仍没有 generation tag。故本项从“producer 缺失”改为“本地源码缩小、集成 epoch assertion 必需”，用 `{lane,lrqid,IID,flush_epoch}` scoreboard 验证 bit 复用边界。
 
 ### LRQ-RR-04：非适用 payload 保留旧 entry 数据
 
@@ -63,5 +69,5 @@ replay lch entry 用 `{{LRQENTRY-LSIQENTRY{1'b0}}, ...}` 扩展（`srcs/xx_lsu_l
 
 1. 补齐 LRQ-RR-01 `halt_info`。
 2. 将 IDU pop 和 age update 收敛到真实 `create_accept`，并增加容量预留/flush-kill 断言。
-3. 在 MMU/LFB/SQ/WMB/SFP 完整工程绑定 flush epoch、entry-bit/IID 所有权和 no-spec 合同。
+3. 在已补齐的 MMU/LFB/SQ/WMB 与 LRQ 边界绑定 flush epoch、entry-bit/IID 所有权；另补 IDU/SFP 合同。
 4. 清零条件 payload并增加参数静态检查。

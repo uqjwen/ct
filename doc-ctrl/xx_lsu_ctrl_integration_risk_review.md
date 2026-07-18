@@ -2,13 +2,13 @@
 
 ## 1. 范围与结论
 
-基于提交 `a81c012` 复核全局/pipe 门控时钟、LRQ 迁移后的 restart/wakeup bitmap、flush/参数合同和所有已提供模块的 named-port 连接。仓库缺少大量被 top 实例化的模块、宏头文件和 helper，因此本次只能完成 source-level 结构审查，不能声称已完整 elaboration。
+基于提交 `a81c012` 完成初审，并在 Interaction 1.4 提交 `6260f4a` 上复核全局/pipe 门控时钟、LRQ 迁移后的 restart/wakeup bitmap、flush/参数合同和新增 MMU/LFB/SQ/WMB/LSDA producer。仓库仍缺部分 top 实例模块、宏头文件、helper 和 testbench，因此只能完成 source-level 结构审查，不能声称已完整 elaboration。
 
 | ID | 优先级 | 置信度 | 状态 | 摘要 |
 |---|---:|---|---|---|
 | CTRL-RR-01 | P2 | 已确认 | VMB 笔误已修，剩余遗漏当前配置关闭 | create1 已补；ICC/LSDA special enable 仍未进入父门控 |
 | CTRL-RR-02 | P1 | 已给定合同 | 条件关闭待静态保护 | CTRL→LRQ bitmap 要求 `LRQENTRY == LSIQENTRY` |
-| CTRL-RR-03 | P1 | 源码+合同 | 可见 DA 路径关闭，外部 producer 条件关闭 | 多来源 wakeup 仅按 entry bitmap OR，完整签核仍需 epoch 断言 |
+| CTRL-RR-03 | P1 | 源码+合同 | producer 本地源码缩小，集成边界保留 | MMU/LFB/SQ/WMB flush 后清 bitmap，consumer仍仅按 entry bit OR |
 | CTRL-RR-04 | P2 | 已给定配置 | 迁移边界 | top 对外 IDU 状态多数 tie 0，内部状态改送 LRQ |
 | CTRL-RR-05 | P3 | 结构确认 | 工具边界 | 已提供 13 个 instance 的 named-port 集合一致，但不等于完整编译成功 |
 
@@ -36,7 +36,9 @@ CTRL 将 RF restart、DC immediate、DA second/ECC、SQ/WMB dependency、MMU asy
 
 Interaction 1.3 声明 entry bit 在请求 DA 终止/不再重发前唯一对应 IID，flush 时 producer 会删除旧 pending。可见 LD-DA 路径确实以 `lda_ex3_inst_vld` 和保存的 LSID 生成 already-da/pop/spec-fail/secd 向量（`srcs/xx_lsu_ld_da.sv:5167-5223`），且 full/check flush 会清 DA stage valid（`srcs/xx_lsu_ld_da.sv:1981-2012`），未发现该路径违反规则。
 
-但 MMU/LFB/SQ/WMB producer 不在仓库中，consumer 仍只是无 IID/epoch 的 bitmap OR，`tlb_busy` 甚至直接按 bit wake 清除（`srcs/xx_lsu_lrq_entry.sv:694-705`）。因此本项只能按合同条件关闭，不能源码关闭；必须在每个缺失 producer 侧证明“bitmap只针对仍活动的同一 entry epoch”，并用 flush+复用+迟到 wakeup 负向注入验证。
+Interaction 1.4 补齐的 producer 显示，MMU TMQ 保存 IID/LSID 并在 check-flush 拍发送后清空 LSID；LFB/SQ/WMB wakeup queue 也采用“check-flush 拍发送当前 bitmap、下一拍清零，full flush 直接清零”的结构（详见 `docs/interaction-1.4-followup-review.md` 第 4 节）。因此没有发现这些 producer 在 flush 后继续保存旧 bit 的本地路径。
+
+consumer 仍只是无 IID/epoch 的 bitmap OR，LRQ 按 bit 清除 freeze（`srcs/xx_lsu_lrq_entry.sv:694-705`），所以 wrapper/top 接线和 entry 立即复用边界仍必须用 epoch scoreboard 证明。本项由“producer 缺失的合同关闭”更新为“producer 本地源码缩小、集成边界保留”。
 
 ### CTRL-RR-04：top 的 IDU 接口已迁移到 LRQ 语义
 
@@ -46,7 +48,7 @@ top 对外多个旧 `lsu*_idu_*` backpressure/status 输出固定为 0，wakeup/
 
 ### CTRL-RR-05：结构检查边界
 
-对仓库内可见模块进行了平衡括号和 named-port 集合检查：LQ entry、3 个 LRQ entry generate、RB entry generate（`srcs/xx_lsu_lq.sv:244-248`、`srcs/xx_lsu_lrq.sv:969-1266`、`srcs/xx_lsu_rb.sv:870-876`），以及 top 中 LQ/LRQ/AG/DC/DA/WB/RB/CTRL 共 13 个 instance（`srcs/xx_lsu_top.sv:4452-12461`），均无重复、缺失或额外 named port。由于 `xx_lsu_vmb`、LS wrapper、clock cell、vector helper 和宏定义未提供，该结果只证明可见接口集合一致，不能替代编译/elaboration。
+既有可见模块的平衡括号和 named-port 集合检查未发现重复端口；Interaction 1.4 又补充了 LS wrapper、MMU/LFB/SQ/WMB 等实现。但 top 实例化的 `xx_lsu_wb_arbiter` 仍没有源文件（`srcs/xx_lsu_top.sv:10594-10627`），clock cell、vector/helper、宏定义也未完整提供。结构文本检查仍不能替代编译/elaboration。
 
 ## 4. 处理顺序
 

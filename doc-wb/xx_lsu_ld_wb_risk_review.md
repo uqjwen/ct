@@ -2,14 +2,14 @@
 
 ## 1. 范围与结论
 
-基于提交 `a81c012` 复核 DA/RB completion 仲裁、DA/WMB/VMB/RB data 仲裁、标量/向量写回、VMB merge、exception/no-spec/vstart 和 debug data-trigger 流水。缺失的 WMB/VMB/RB producer 保持、`xx_lsu_bus_arb` 公平性与 RTU 接收协议按合同依赖分类。
+基于提交 `a81c012` 完成初审，并在 Interaction 1.4 提交 `6260f4a` 上复核 DA/RB completion 仲裁、DA/WMB/VMB/RB data 仲裁、标量/向量写回、VMB merge、exception/no-spec/vstart 和 debug data-trigger 流水。新增 WMB/LSDA/top 源码已纳入判断；真正的 `xx_lsu_wb_arbiter`、VMB producer 和 RTU 接收协议仍按合同依赖分类。
 
 | ID | 优先级 | 置信度 | 状态 | 摘要 |
 |---|---:|---|---|---|
-| WB-RR-01 | P2 | 已确认 | 开放 | RB data-trigger halt-info 更新没有打开 completion payload 时钟 |
-| WB-RR-02 | P2 | 高置信 | 开放待合同 | halt bit0 无显式消费清零，却可绕过 `inst_vld` 持续产生 completion |
+| WB-RR-01 | P2 | 已确认 | 修复未闭合 | completion clock 已补 update valid，但 update valid 的 source data clock仍可能不开 |
+| WB-RR-02 | P2 | 已确认 | 开放 | bit1 虽形成 clear 条件，completion clock enable 未覆盖该 clear 事件 |
 | WB-RR-03 | P2 | 源码+合同 | 数据正确性关闭，活性待断言 | 源码证明 `req -> dp -> gate`；dp-only 会真实占用仲裁 |
-| WB-RR-04 | P1 | 合同依赖 | 条件关闭待系统验证 | 固定优先级仍需 lower-priority 保持和有界前进保证 |
+| WB-RR-04 | P1 | 合同依赖 | 仍开放待 arbiter | top 实例化的三 lane `xx_lsu_wb_arbiter` 未提供，新增 bus arb不是该模块 |
 | WB-RR-05 | P3 | 已确认 | 清理项 | preg 时钟 enable 含重复 RB 项，造成无意义开钟 |
 
 ## 2. 仲裁摘要
@@ -20,15 +20,15 @@ completion 固定 DA 高于 RB（`srcs/xx_lsu_ld_wb.sv:744-783`）。data 固定
 
 ### WB-RR-01：RB data-trigger halt-info 更新可能丢失
 
-`rb_data_halt_info_update_vld` 在 data 时钟域由两级 DTU 流水产生（`srcs/xx_lsu_ld_wb.sv:1789-1819`），随后试图在 `ld_wb_cmplt_clk` 上更新 `ld_wb_halt_info`（`srcs/xx_lsu_ld_wb.sv:1674-1683`）。但 completion 时钟 enable 只有 `lda_ex3_inst_vld || rb_lwb_ex3_cmplt_req`（`srcs/xx_lsu_ld_wb.sv:1004-1015`），不包含 `rb_data_halt_info_update_vld`。
+`rb_data_halt_info_update_vld` 由两级 DTU 流水后的 raw event 再经 `ld_wb_data_clk` 寄存产生（`srcs/xx_lsu_ld_wb.sv:1731-1741`、`1753-1820`），随后在 `ld_wb_cmplt_clk` 上更新 `ld_wb_halt_info`（`srcs/xx_lsu_ld_wb.sv:1675-1684`）。Interaction 1.4 已把注册后的 update valid 并入 completion clock enable（`srcs/xx_lsu_ld_wb.sv:1005-1007`），因此 consumer 端门控缺口得到修正。
 
-当 RB 的 data check 比 completion 晚到且当拍无新 DA/RB completion 时，更新分支存在但时钟不开，halt-info 丢失。应把该 update valid 并入 completion clock enable，或把 halt-info 寄存器移到始终覆盖该事件的时钟域，并加入“update 必被采样”断言。
+但 source 端仍有一层同类问题：`ld_wb_data_clk_en` 只包含当前 DA/RB/VMB/WMB data request（`srcs/xx_lsu_ld_wb.sv:1044-1047`），没有 raw `rb_entry_data_halt_info_update_vld` 或已注册 update valid。DTU 延迟事件到达时，原 RB data request 通常已经离开；若没有碰巧出现新 data request，source clock 不开，`rb_data_halt_info_update_vld` 仍无法置 1。修复必须覆盖 raw event 的置位与下一拍清零，再由 completion clock可靠采样；或把 update pulse 移到持续覆盖该事件的时钟域。
 
 ### WB-RR-02：halt bit0 可形成粘住的 completion
 
-`ld_wb_halt_info` 只有新 completion、新 RB data update 或 `ld_wb_halt_info_effect` 时改写，而 effect 仅等于 bit1（`srcs/xx_lsu_ld_wb.sv:1674-1685`）。与此同时 `lsu_rtu_ex4_cmplt` 在 bit0 为 1 时无条件为 1，`abnormal` 也直接包含 bit0（`srcs/xx_lsu_ld_wb.sv:1581-1591`）。
+`ld_wb_halt_info` 只有新 completion、新 RB data update 或 `ld_wb_halt_info_effect` 时改写，而 effect 等于 bit1（`srcs/xx_lsu_ld_wb.sv:1675-1686`）。与此同时 `lsu_rtu_ex4_cmplt` 在 bit0 为 1 时无条件为 1，`abnormal` 也直接包含 bit0（`srcs/xx_lsu_ld_wb.sv:1581-1591`）。
 
-如果 RTU 把 completion 当单周期事件且没有隐含 level-handshake，bit0 会在 `lwb_ex4_inst_vld` 已清零后继续以旧 IID 重复完成。必须确认 RTU 对该信号的消费合同；更稳健的实现是以活动 completion valid/ack 清除 bit0，并断言无有效事务时 completion 不得只由 stale halt-info 产生。
+Interaction 1.4 说明 DTU 总让最低两位同时为 1；这只能证明 clear 分支的组合条件会成立，不能证明寄存器下一拍真的执行。当前 `ld_wb_cmplt_clk_en` 不包含 `ld_wb_halt_info_effect`（`srcs/xx_lsu_ld_wb.sv:1005-1007`），若没有新 completion/update，clock 关闭，`11` 会继续保持。因此本项已从“待 RTU 合同”收敛为可见门控缺口；需要 clear event 打开 completion clock，或提供明确 level/ack 清除路径。
 
 ### WB-RR-03：DA request/dp/gate 三信号合同
 
@@ -40,7 +40,9 @@ DA grant 用 `lda_lwb_ex3_data_req_dp`，而 EX4 data valid 用真实 `lda_lwb_e
 
 ### WB-RR-04：固定优先级可能饿死低优先级请求
 
-completion 始终 DA 优先 RB，data 始终 DA、WMB、VMB、RB 优先（`srcs/xx_lsu_ld_wb.sv:746-806`）。Interaction 1.3 给出的 issue-queue 反压和 `xx_lsu_bus_arb` 可选三个空闲 lane 说明了预期闭环，因此本项可按系统合同条件关闭；但当前仓库没有 bus arb、WMB/VMB producer 或 issue queue 源码，无法从本模块证明“持续高优先级流量必然停止”。尤其 WB-RR-03 的 ECC dp-only 会在本 lane 继续屏蔽 lower requester。签核仍需有界 grant/hold-until-grant assertion；若合同无法满足，应增加轮转/年龄仲裁或 starvation counter。
+completion 始终 DA 优先 RB，data 始终 DA、WMB、VMB、RB 优先（`srcs/xx_lsu_ld_wb.sv:746-806`）。新增 top 显示三 lane 调度由 `xx_lsu_wb_arbiter` 产生 `arb_lwb0/lswb0/lswb1_*_req`（`srcs/xx_lsu_top.sv:10594-10627`），但仓库没有该模块的实现。新增 `xx_lsu_bus_arb.sv` 实际仲裁 BIU AR/AW/W 通道，并不是 writeback lane arbiter；不能据此证明请求可迁移到任意空闲 lane。
+
+WMB entry 在未获 grant 时会保持 `wb_data_success=0` 和 data request（`srcs/xx_lsu_wmb_entry.sv:1034-1043`、`2071-2074`），这关闭了 WMB 本地“loser 立即丢请求”的担忧；但三 lane 选择与有界前进仍缺核心源码。尤其 WB-RR-03 的 ECC dp-only 会在单 lane 屏蔽低优先级 requester，故本项保持开放待 `xx_lsu_wb_arbiter` 和 bounded-grant assertion。
 
 ### WB-RR-05：preg 时钟 enable 重复项
 
@@ -48,4 +50,4 @@ completion 始终 DA 优先 RB，data 始终 DA、WMB、VMB、RB 优先（`srcs/
 
 ## 4. 结论
 
-数据选择在合法 grant one-hot 和 request 保持合同下结构一致；VMB 512-bit 拼接与 byte-mask 分区清晰。Interaction 1.3 已关闭 `req=1 && dp=0` 数据错误，但没有消除 dp-only 与固定优先级的活性验证义务。首要修复仍为 WB-RR-01，随后确认 halt bit0 的 RTU level/脉冲语义及系统有界前进合同。
+数据选择在合法 grant one-hot 和 request 保持合同下结构一致；VMB 512-bit 拼接与 byte-mask 分区清晰。Interaction 1.3 已关闭 `req=1 && dp=0` 数据错误，但没有消除 dp-only 与固定优先级的活性验证义务。Interaction 1.4 后首要项为同时修正 WB-RR-01 的 source/consumer 时钟链与 WB-RR-02 的 clear 时钟，再补齐 `xx_lsu_wb_arbiter` 做有界前进证明。
