@@ -1,0 +1,38 @@
+/*
+ Copyright (c) 2023 CHUXIN Team.  All rights reserved.
+
+ This model is the confidential and proprietary property
+ of CHUXIN team and the possession or use of this
+ file requires a written license from CHUXIN team.
+ 
+ This work may not be copied, modified, re-published, 
+ uploaded, executed, or distributed in any way, in any
+ medium, whether in whole or in part, without prior
+ written permission from CHUXIN Team.
+*/
+${CODE_BASE_PATH}/wk-core/mmu/xx_mmu_arb.v
+${CODE_BASE_PATH}/wk-core/mmu/xx_mmu_dplru.v
+${CODE_BASE_PATH}/wk-core/mmu/xx_mmu_dutlb_tmq_entry.sv
+${CODE_BASE_PATH}/wk-core/mmu/xx_mmu_dutlb_tmq.sv
+${CODE_BASE_PATH}/wk-core/mmu/xx_mmu_dutlb.v
+${CODE_BASE_PATH}/wk-core/mmu/xx_mmu_dutlb_entry.v
+${CODE_BASE_PATH}/wk-core/mmu/xx_mmu_dutlb_huge_entry.v
+${CODE_BASE_PATH}/wk-core/mmu/xx_mmu_dutlb_read.v
+${CODE_BASE_PATH}/wk-core/mmu/xx_mmu_iplru.v
+${CODE_BASE_PATH}/wk-core/mmu/xx_mmu_iutlb.v
+${CODE_BASE_PATH}/wk-core/mmu/xx_mmu_iutlb_entry.v
+${CODE_BASE_PATH}/wk-core/mmu/xx_mmu_iutlb_fst_entry.v
+${CODE_BASE_PATH}/wk-core/mmu/xx_mmu_jtlb.v
+${CODE_BASE_PATH}/wk-core/mmu/xx_mmu_jtlb_data_array.v
+${CODE_BASE_PATH}/wk-core/mmu/xx_mmu_jtlb_tag_array.v
+${CODE_BASE_PATH}/wk-core/mmu/xx_mmu_ptw_mshr_entry.sv
+${CODE_BASE_PATH}/wk-core/mmu/xx_mmu_ptw_mshr.sv
+${CODE_BASE_PATH}/wk-core/mmu/xx_mmu_pfu.sv
+${CODE_BASE_PATH}/wk-core/mmu/xx_mmu_pfu_entry.sv
+${CODE_BASE_PATH}/wk-core/mmu/xx_mmu_ptw.v
+${CODE_BASE_PATH}/wk-core/mmu/xx_mmu_regs.v
+${CODE_BASE_PATH}/wk-core/mmu/xx_mmu_sysmap.v
+${CODE_BASE_PATH}/wk-core/mmu/xx_mmu_sysmap_hit.v
+${CODE_BASE_PATH}/wk-core/mmu/xx_mmu_tlboper.v
+${CODE_BASE_PATH}/wk-core/mmu/xx_mmu_top.v
+

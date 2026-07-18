@@ -30,3 +30,14 @@
 17. 怎么没有xx_lsu_ld_da的对应的分析。
 ***
 请继续排查，是否需要提供其他额外信息以供决策
+
+# interaction 1.4
+***
+1. 针对LRQ-RR-01，这个确实是个问题，我们将在后续修改版本。
+2. 针对WB-RR-01，这个确实是个问题，添加ld_wb_cmplt_clk钟控使能ld_wb_cmplt_clk_en条件。
+3. 针对DC-RR-01，这个确实是个问题，我们将在后续版本修改。
+4. 针对DA-RR-01，这个确实是个问题，详见修改。
+5. 针对WB-RR-02，来自dtu的halt-info一边都是最低两个bits同时为1，意味着ld_wb_halt_info[0]只会维持一个时钟周期的高电平。
+6. 由于没有DA的报告，看不到DA-RR-02/04，请重新生成DA的详细报告放入doc-da目录。
+7. 补充了需要的module，希望有助于解决interaction-1.3-followup-review第5点相关问题。
+***

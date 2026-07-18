@@ -1003,7 +1003,8 @@ assign ld_wb_pre_no_spec_target  = ld_wb_da_cmplt_grnt &&  lda_lwb_ex3_no_spec_t
 //==========================================================
 //------------------cmplt part gateclk----------------------
 assign ld_wb_cmplt_clk_en =   lda_ex3_inst_vld
-                              ||  rb_lwb_ex3_cmplt_req;
+                              ||  rb_lwb_ex3_cmplt_req
+                              ||  rb_data_halt_info_update_vld;
 // &Instance("gated_clk_cell", "x_lsu_ld_wb_cmplt_gated_clk"); @296
 gated_clk_cell  x_lsu_ld_wb_cmplt_gated_clk (
   .clk_in             (forever_cpuclk    ),
