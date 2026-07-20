@@ -41,3 +41,18 @@
 6. 由于没有DA的报告，看不到DA-RR-02/04，请重新生成DA的详细报告放入doc-da目录。
 7. 补充了需要的module，希望有助于解决interaction-1.3-followup-review第5点相关问题。
 ***
+
+# interaction 1.5
+***
+1. 针对CTRL-RR-03，当前设计没有引入epoch的概念，本设计是在C910开源代码修改的，请继续确认是否存在设计风险
+2. 针对DA-RR-01，这是设计bug，笔误，为啥不用P1优先级，而是用P2呢？
+3. 针对DA-RR-03，同CTRL-RR-03，当前设计没有引入epoch的概念，本设计是在C910开源代码修改的，请继续确认是否存在设计风险。
+4. 针对DC-RR-02，能够确保在snq模块中snq_dcache_arb_ld_borrow_req_gate和snq_dcache_arb_ld_borrow_req是等同的，在vb模块中vb_dcache_arb_ld_borrow_req_gate比vb_dcache_arb_ld_borrow_req成立要求更宽松，即，vb_dcache_arb_ld_borrow_req_gate=1成立是vb_dcache_arb_ld_borrow_req=1成立的必要条件，vb_dcache_arb_ld_borrow_req=1是vb_dcache_arb_ld_borrow_req_gate=1的充分条件。
+5. 针对DC-RR-05，unite-stride是512bit数据位宽，对应64个字节有效位，普通标量/非unite-stride向量，128位数据位宽，对应16个字节有效位只用第一个bytes_vld/reg_bytes_vld。对应普通标量加载，其他字节有效位=1没有功能上的影响，这里对于普通加载没有置零是为了综合网表时形成门控，降低功耗。
+6. 针对LRQ-RR-03，同CTRL-RR-03，当前设计没有引入epoch的概念，请继续确认是否存在设计风险。
+7. 针对LRQ-RR-04，同DC-RR-05
+8. 针对RB-RR-02，由于本设计继承玄铁C910， “RTU 对 async flush 的全局 response 取消规则与 BIU 的 outstanding ownership 仍不可见”请参考C910代码
+9. RB-RR-04，由于本设计继承玄铁C910，“BIU 对固定 ID 的全局 outstanding/返回规则”，请参考C910代码
+10. 针对WB-RR-01/02，请参考代码修改
+11. 针对WB-RR-04，添加了xx_lsu_wb_arbiter代码
+***

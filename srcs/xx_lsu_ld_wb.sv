@@ -1004,6 +1004,7 @@ assign ld_wb_pre_no_spec_target  = ld_wb_da_cmplt_grnt &&  lda_lwb_ex3_no_spec_t
 //------------------cmplt part gateclk----------------------
 assign ld_wb_cmplt_clk_en =   lda_ex3_inst_vld
                               ||  rb_lwb_ex3_cmplt_req
+                              ||  ld_wb_halt_info_effect
                               ||  rb_data_halt_info_update_vld;
 // &Instance("gated_clk_cell", "x_lsu_ld_wb_cmplt_gated_clk"); @296
 gated_clk_cell  x_lsu_ld_wb_cmplt_gated_clk (
@@ -1044,6 +1045,7 @@ gated_clk_cell  x_lsu_ld_wb_expt_gated_clk (
 assign ld_wb_data_clk_en =  lda_lwb_ex3_data_req_gateclk_en
                             || rb_lwb_ex3_data_req
                             || vmb_lwb_data_req
+                            || ld_dtu2_vld
                             || wmb_lwb_data_req;  
 // &Instance("gated_clk_cell", "x_lsu_ld_wb_data_gated_clk"); @317
 gated_clk_cell  x_lsu_ld_wb_data_gated_clk (

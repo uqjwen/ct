@@ -3435,7 +3435,7 @@ assign ld_da_boundary_data[127:0] = lda_ecc_stall_already & lda_ex3_inst_us
 assign lda_rb_ex3_data_ori[127:0]        = ld_da_boundary_data[127:0];
 assign lda_rb_ex3_data_ori1              = lda_ecc_stall_already? lda_lwb_ex3_data1: ld_da_data_ff1;
 assign lda_rb_ex3_data_ori2              = lda_ecc_stall_already? lda_lwb_ex3_data2: ld_da_data_ff2;
-assign lda_rb_ex3_data_ori3              = lda_ecc_stall_already? lda_lwb_ex3_data2: ld_da_data_ff3;
+assign lda_rb_ex3_data_ori3              = lda_ecc_stall_already? lda_lwb_ex3_data3: ld_da_data_ff3;
 
 //==========================================================
 //            Data settle and Sign extend
