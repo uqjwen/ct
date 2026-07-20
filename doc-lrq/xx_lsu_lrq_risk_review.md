@@ -2,7 +2,7 @@
 
 ## 1. 范围与结论
 
-本轮基于提交 `a81c012` 完成初审，并在 Interaction 1.4 提交 `6260f4a` 上复核三组独立 LRQ bank 的 create、freeze、wakeup、issue、pop、flush、age-vector 和 replay payload。新增 MMU/LFB/SQ/WMB/LSDA 源码已纳入 flush-epoch 追踪；仿真清单、helper、IDU/SFP 与完整集成 testbench 仍缺失。
+本轮基于提交 `a81c012` 完成初审，并在 Interaction 1.5 提交 `443384a` 上复核三组独立 LRQ bank 的 create、freeze、wakeup、issue、pop、flush、age-vector 和 replay payload。MMU/LFB/SQ/WMB/LSDA 源码已纳入 owner-lifetime 追踪；仿真清单、helper、IDU/SFP 与完整集成 testbench 仍缺失。
 
 未发现三 bank 之间的直接分配碰撞：每个 bank 有独立 valid/free pointer，跨 bank 只共享全局年龄关系。保留 1 个已确认调试功能问题、2 个合同依赖的事务风险和 2 个清理/配置问题。
 
@@ -10,8 +10,8 @@
 |---|---:|---|---|---|
 | LRQ-RR-01 | P2 | 已确认 | 开放 | replay 未保存 `halt_info`，AG 改取当前 IDU 总线 |
 | LRQ-RR-02 | P1 | 合同依赖 | 条件关闭待断言 | no-space 预留和 flush 同步 kill 保证 create/pop 原子性 |
-| LRQ-RR-03 | P1 | 源码+合同 | 源码缩小，边界待断言 | MMU/LFB/SQ/WMB 本地 flush 后清 bitmap；LRQ 无 generation tag，仍需集成 epoch 证明 |
-| LRQ-RR-04 | P3 | 已确认 | 清理项 | 条件 payload 在非 US create 时保留上个 entry 的旧值 |
+| LRQ-RR-03 | P1 影响 | 源码+合同 | 未发现具体 bug，条件关闭 | 无 generation tag 不是缺陷；可见 producer 在 entry 复用前清除旧 owner，保留集成断言 |
+| LRQ-RR-04 | P3 | 源码+合同 | 功能关闭/功耗意图 | 非 US create 保留旧高位 mask，但完整 replay 消费链以 saved `inst_us` 资格化 |
 | LRQ-RR-05 | P3 | 已给定配置 | 约束项 | 多处表达式要求 `LRQENTRY>=LSIQENTRY`，正式配置又要求二者相等 |
 
 ## 2. Entry 生命周期与优先级
@@ -37,7 +37,7 @@ LRQ entry 的 create payload 与 read payload覆盖地址、IID、PC、寄存器
 
 ### LRQ-RR-03：旧 MMU wakeup 与 entry 复用
 
-entry 只按 bit 接受 controller/MMU wakeup（`srcs/xx_lsu_lrq_entry.sv:695-705`、`srcs/xx_lsu_lrq_entry.sv:769-822`），没有 generation/epoch；full/partial flush 清 valid 后该 bit 可再次分配。Interaction 1.3 已明确 MMU 在 flush 时删除旧 pending，且 entry bit 在事务 DA 终止/不再重发前唯一对应 IID。
+entry 只按 bit 接受 controller/MMU wakeup（`srcs/xx_lsu_lrq_entry.sv:695-705`、`srcs/xx_lsu_lrq_entry.sv:769-822`），没有 generation/epoch；full/partial flush 清 valid 后该 bit 可再次分配。Interaction 1.3 已明确 MMU 在 flush 时删除旧 pending，且 entry bit 在事务 DA 终止/不再重发前唯一对应 IID。Interaction 1.5 又明确设计不引入 epoch；这不是独立缺陷，必须检查其等价的 owner-lifetime 不变量。
 
 本轮逐一检查可见实现，没有发现违反该守则的本地路径：
 
@@ -51,11 +51,15 @@ Interaction 1.4 补齐的 producer 进一步缩小了本项：
 - LFB 在 check-flush 拍输出保存与同拍新增 bitmap，下一拍清零；full flush 直接清零（`srcs/xx_lsu_lfb.sv:1543-1598`）。
 - SQ 与 WMB 的 global/data dependency queue 采用同类“flush 拍发送、下一拍清空”结构（`srcs/xx_lsu_sq.sv:2505-2576`、`srcs/xx_lsu_wmb.sv:3602-3633`、`3747-3777`）。
 
-因此没有发现这些 producer 在 flush 后继续保存旧 entry bit 的本地路径。需要注意，LRQ 的“释放”条件在源码中仍是 DA terminal/non-restart pop，而不是所有类型都先看到 WB completion；consumer 也仍没有 generation tag。故本项从“producer 缺失”改为“本地源码缩小、集成 epoch assertion 必需”，用 `{lane,lrqid,IID,flush_epoch}` scoreboard 验证 bit 复用边界。
+因此没有发现这些 producer 在 flush 后继续保存旧 entry bit 的本地路径。valid 的 flush 优先级和 allocator 的拍前 valid 又保证被 kill 的 entry 不能在同一拍分配给新 owner。需要注意，LRQ 的“释放”条件在源码中仍是 DA terminal/non-restart pop，而不是所有类型都先看到 WB completion；wrapper 边界也不携带 IID。
+
+当前结论是“未发现具体设计 bug，按生命周期合同条件关闭”：RTL 不必增加 generation tag；验证环境用 `{lane,lrqid,IID,observer_generation}` 作为观察键，并断言 `wakeup[bit] -> entry_vld[bit] && producer_owner_iid == entry_iid`、`create_accept(bit) -> no old-owner producer pending`。若这些断言失败，再修相应 producer 或引入 generation 防护。
 
 ### LRQ-RR-04：非适用 payload 保留旧 entry 数据
 
-`bytes_vld2/3` 和 `reg_bytes_vld1/2/3` 只在 `unit_stride && vls` create 时更新；其他 create 不清零（`srcs/xx_lsu_lrq_entry.sv:467-480`）。只要消费者严格以 saved `inst_vls/unit_stride` 资格化，这些旧值是死字段；否则 entry 复用后会把前一事务 mask 带入 replay。建议每次 create 都确定化，或绑定“不适用字段不可消费”的断言。
+`bytes_vld2/3` 和 `reg_bytes_vld1/2/3` 只在 `unit_stride && vls` create 时更新；其他 create 不清零（`srcs/xx_lsu_lrq_entry.sv:467-480`）。Interaction 1.5 说明这是避免非 US 更新高位寄存器的功耗意图。
+
+完整消费链支持该解释：AG 重放后生成 saved `inst_us`（`srcs/xx_lsu_ld_ag.sv:2137-2179`），DC 与 DA 仅在 US valid 时锁存高位 mask（`srcs/xx_lsu_ld_dc.sv:1409-1426`、`srcs/xx_lsu_ld_da.sv:2480-2497`），RB entry/WB 同样只在 `inst_us` 时更新或消费高位字段（`srcs/xx_lsu_rb_entry.sv:1304-1355`、`srcs/xx_lsu_ld_wb.sv:1420-1427`、`1532-1568`）。因此非 US 旧值是死字段，功能风险关闭；保留“不适用字段不可消费”断言，不要求清零。
 
 ### LRQ-RR-05：固定参数关系没有 elaboration 保护
 
@@ -69,5 +73,5 @@ replay lch entry 用 `{{LRQENTRY-LSIQENTRY{1'b0}}, ...}` 扩展（`srcs/xx_lsu_l
 
 1. 补齐 LRQ-RR-01 `halt_info`。
 2. 将 IDU pop 和 age update 收敛到真实 `create_accept`，并增加容量预留/flush-kill 断言。
-3. 在已补齐的 MMU/LFB/SQ/WMB 与 LRQ 边界绑定 flush epoch、entry-bit/IID 所有权；另补 IDU/SFP 合同。
-4. 清零条件 payload并增加参数静态检查。
+3. 在已补齐的 MMU/LFB/SQ/WMB 与 LRQ 边界绑定 entry-bit/IID owner-lifetime；observer generation 只放在 scoreboard，另补 IDU/SFP 合同。
+4. 对保留的非适用 payload 绑定“不消费”断言，并增加参数静态检查。
