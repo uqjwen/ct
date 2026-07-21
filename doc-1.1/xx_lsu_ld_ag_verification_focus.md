@@ -580,3 +580,34 @@ assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
 4. RR-13：未提供的 lane2/lane3 AG/DC wrapper 是否使用与 lane0 完全相同的 `create_frz` 所有权方程？
 5. RR-12：正式 X-prop 政策是 functional ambiguity 还是 literal any-X？若为后者，`00X/1X0/1X1` 准备如何处理？
 6. RR-14/RR-16：请在 MMU 集成层提供三路 immediate tie-off、full/partial-flush 精确删除 pending、flush 优先 async wake 与 bit 复用的可绑定断言。
+
+## 14. Interaction 1.6 新 AG 路径定向回归
+
+新增交叉 `stall_source={none, dcache, bkcon, us_tag_req, us_tag_ack}` × `mmu_result={hit, tlbmiss, pagefault, accessfault_next_cycle}` × `older_rf={0,1}` × `flush={none,full,partial}`。
+
+必须检查：
+
+- no-stall access-fault只由 DA 对齐路径消费一次，AG saved-fault 路径不得重复报错；
+- stall access-fault只属于当前 AG IID，保存后即使 raw fault 脉冲消失也最终报错一次；
+- TLB miss 令 EX1 失效且不进入 DC，PF/AF 则在结构 stall 解除后进入 DC；
+- US tag request、way capture、data request严格按三阶段，任何 fault overlap 都不得产生有效 data consumer；
+- fault 后允许的投机 D-cache 读不得引起 LQ/RB create、WB 或架构状态更新。
+
+建议绑定：
+
+```systemverilog
+a_stalled_af_eventually_reaches_dc:
+assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
+  mmu_lsu_access_fault && lag_bkcon_stall_already
+  |-> ##[0:AG_STALL_BOUND] (lag_ldc_ex1_inst_vld && lag_ldc_ex1_expt_vld));
+
+a_tlbmiss_never_enters_dc:
+assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
+  lag_bkcon_tlbmiss |-> !lag_ldc_ex1_inst_vld);
+
+a_us_way_only_captured_after_tag_ack:
+assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
+  $changed(lag_ex1_us_way) |-> $past(lag_us_tag_req_success_flop));
+```
+
+`AG_STALL_BOUND` 取系统允许的最大 backpressure；若系统允许永久 backpressure，则把第一条改为“fault 状态保持直到 flush 或 DC accept”的 safety 断言。

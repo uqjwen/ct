@@ -8,7 +8,7 @@
 |---|---:|---|---|---|
 | CTRL-RR-01 | P2 | 已确认 | VMB 笔误已修，剩余遗漏当前配置关闭 | create1 已补；ICC/LSDA special enable 仍未进入父门控 |
 | CTRL-RR-02 | P1 | 已给定合同 | 条件关闭待静态保护 | CTRL→LRQ bitmap 要求 `LRQENTRY == LSIQENTRY` |
-| CTRL-RR-03 | P1 影响 | 源码+合同 | 未发现具体 bug，条件关闭 | 无 RTL epoch 不是缺陷；可见 producer 在 bit 复用前清旧 owner，集成边界保留 owner-IID 断言 |
+| CTRL-RR-03 | P1 影响 | 源码+合同 | 本地断言已实现，精确 owner 待绑定 | 无 RTL epoch 不是缺陷；LRQ 已检查 live/reuse 可见边界，owner-IID 仍需 producer 元数据 |
 | CTRL-RR-04 | P2 | 已给定配置 | 迁移边界 | top 对外 IDU 状态多数 tie 0，内部状态改送 LRQ |
 | CTRL-RR-05 | P3 | 结构确认 | 工具边界 | 已检查可见 instance 的 named-port 集合；文本一致不等于完整编译成功 |
 
@@ -38,7 +38,7 @@ Interaction 1.3 声明 entry bit 在请求 DA 终止/不再重发前唯一对应
 
 Interaction 1.4 补齐的 producer 显示，MMU TMQ 保存 IID/LSID 并在 check-flush 拍发送后清空 LSID；LFB/SQ/WMB wakeup queue 也采用“check-flush 拍发送当前 bitmap、下一拍清零，full flush 直接清零”的结构（详见 `docs/interaction-1.4-followup-review.md` 第 4 节）。LRQ allocator 又按拍前 valid 选择空 entry，flush 拍刚被释放的 bit 不能同拍复用（`srcs/xx_lsu_lrq_entry.sv:485-495`、`srcs/xx_lsu_lrq.sv:1411-1474`）。因此没有发现 producer 旧 bit 跨越下一次 create-accept 的本地路径。
 
-Interaction 1.5 明确设计不引入 epoch。该选择本身没有功能问题：epoch 可以只作为 testbench 观察变量，RTL 的等价正确性条件是“bit 复用前所有旧 owner producer 状态已经清空”。consumer 仍只是无 IID 的 bitmap OR，LRQ 按 bit 清除 freeze（`srcs/xx_lsu_lrq_entry.sv:694-705`），所以本项按现有源码/合同条件关闭，同时保留 `wakeup -> live entry && producer owner IID == entry IID` 以及 `create_accept -> no old-owner pending` 两类边界断言。若断言失败，才需要修 producer 生命周期或增加硬件 generation tag。
+Interaction 1.5 明确设计不引入 epoch。该选择本身没有功能问题：epoch 可以只作为 testbench 观察变量，RTL 的等价正确性条件是“bit 复用前所有旧 owner producer 状态已经清空”。consumer 仍只是无 IID 的 bitmap OR，LRQ 按 bit 清除 freeze（`srcs/xx_lsu_lrq_entry.sv:694-705`）。Interaction 1.6 已实现 `wakeup -> live entry` 与 `create_accept -> no same-bit visible old wakeup`；精确的 producer owner IID/pending 仍需集成 bind。只有这些断言失败时，才需要修 producer 生命周期或增加硬件 generation tag。
 
 ### CTRL-RR-04：top 的 IDU 接口已迁移到 LRQ 语义
 
@@ -61,3 +61,9 @@ top 对外多个旧 `lsu*_idu_*` backpressure/status 输出固定为 0，wakeup/
 - LRQ-RR-03 与 CTRL-RR-03 是同一迟到 wakeup/entry 复用合同，前者定位 consumer，后者覆盖全部 producer OR 树；两者都不要求 RTL 必须增加 epoch。
 - LRQ-RR-05 与 CTRL-RR-02 是同一 `LRQENTRY/LSIQENTRY` 参数合同，不重复计为两个独立缺陷。
 - DA-RR-01 的历史错误数据会经 RB/WB/VMB 传播；Interaction 1.5 已修正源选择，仍须端到端回归 512-bit identity。
+
+## 6. Interaction 1.6：CTRL-RR-03 断言落地边界
+
+`srcs/xx_lsu_lrq.sv` 已在 `` `ifndef SYNTHESIS`` 下对 lane0/2/3 的每个 entry 实现两类断言：`wakeup -> entry_vld`，以及 `create_accept -> no same-bit visible old wakeup`。它们直接覆盖 CTRL 输出在 LRQ consumer 边界的可见安全性，不改变综合网表。
+
+现有 CTRL/LRQ 接口仍只携带 bitmap，没有 producer owner IID 或 pending generation。因此 README 要求的 `producer_owner_iid == entry_iid` 和“所有 producer 的旧 owner pending 均为 0”不能由 LRQ 本地信号完整证明；应从 MMU/LFB/SQ/WMB/DA/LSDA 用 bind/scoreboard 导出 verification-only owner 元数据。CTRL-RR-03 现更新为“本地可观察断言已实现，跨 producer 精确 owner 证明仍为集成 sign-off 条件”。

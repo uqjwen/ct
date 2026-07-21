@@ -57,3 +57,7 @@ assert property (@(posedge ctrl_ld_clk) disable iff (!cpurst_b)
 ## 4. Sign-off
 
 所有 stage/flush/restart 边覆盖；DTU 请求数与输入 debug accept 数相等；borrow payload owner 0 次错配且 VB gate-only 不产生 borrow；正式 cache hit 始终 onehot0；US→scalar 交叉覆盖证明旧高位字段零次消费后方可签核。
+
+## 5. Interaction 1.6 已实现断言的定向验证
+
+`a_ldc_hit_way_onehot0` 已写入 `srcs/xx_lsu_ld_dc.sv`。回归至少注入 `{0,1,2,4}` 路 valid tag 命中：0/1 路不得失败，2/4 路必须失败；同时覆盖 cache disabled、non-CA、flush 后 invalid 和 unit-stride way replay，确认资格化既不漏正式 multi-hit，也不对非适用周期误报。

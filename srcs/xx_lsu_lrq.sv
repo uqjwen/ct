@@ -1473,6 +1473,55 @@ assign lrq3_create_success = lsu3_lrq_create_vld
 assign lrq3_create_vld     = {LRQENTRY{lrq3_create_success}} & lrq3_create_ptr0;
 assign lrq_lsu3_ex1_lrqid  = lrq3_create_ptr0;
 
+`ifndef SYNTHESIS
+// CTRL-RR-03 owner-lifetime checks at the LRQ interface boundary.
+// The visible producer interfaces carry only an entry bitmap, not producer IID
+// metadata.  These assertions therefore prove the locally observable contract:
+// a wakeup must target a live entry, and an accepted create must not overlap a
+// visible wakeup from the previous owner.  Proving
+// producer_owner_iid == entry_iid additionally requires verification-only owner
+// IID/pending metadata to be exported by every wakeup producer.
+generate
+  for (genvar assert_entry = 0; assert_entry < LRQENTRY; assert_entry++) begin : gen_lrq_owner_lifetime_assertions
+    a_lrq0_wakeup_targets_live_entry: assert property (
+      @(posedge forever_cpuclk) disable iff (!cpurst_b)
+        (lsu0_lrq_exx_tlb_wakeup[assert_entry] || lsu0_lrq_frz_clr[assert_entry])
+        |-> lrq0_entry_vld[assert_entry]
+    ) else $error("LRQ0 wakeup targets non-live entry %0d", assert_entry);
+
+    a_lrq2_wakeup_targets_live_entry: assert property (
+      @(posedge forever_cpuclk) disable iff (!cpurst_b)
+        (lsu2_lrq_exx_tlb_wakeup[assert_entry] || lsu2_lrq_frz_clr[assert_entry])
+        |-> lrq2_entry_vld[assert_entry]
+    ) else $error("LRQ2 wakeup targets non-live entry %0d", assert_entry);
+
+    a_lrq3_wakeup_targets_live_entry: assert property (
+      @(posedge forever_cpuclk) disable iff (!cpurst_b)
+        (lsu3_lrq_exx_tlb_wakeup[assert_entry] || lsu3_lrq_frz_clr[assert_entry])
+        |-> lrq3_entry_vld[assert_entry]
+    ) else $error("LRQ3 wakeup targets non-live entry %0d", assert_entry);
+
+    a_lrq0_create_has_no_visible_old_wakeup: assert property (
+      @(posedge forever_cpuclk) disable iff (!cpurst_b)
+        lrq0_create_vld[assert_entry] |->
+        !(lsu0_lrq_exx_tlb_wakeup[assert_entry] || lsu0_lrq_frz_clr[assert_entry])
+    ) else $error("LRQ0 entry %0d reused with an old-owner wakeup", assert_entry);
+
+    a_lrq2_create_has_no_visible_old_wakeup: assert property (
+      @(posedge forever_cpuclk) disable iff (!cpurst_b)
+        lrq2_create_vld[assert_entry] |->
+        !(lsu2_lrq_exx_tlb_wakeup[assert_entry] || lsu2_lrq_frz_clr[assert_entry])
+    ) else $error("LRQ2 entry %0d reused with an old-owner wakeup", assert_entry);
+
+    a_lrq3_create_has_no_visible_old_wakeup: assert property (
+      @(posedge forever_cpuclk) disable iff (!cpurst_b)
+        lrq3_create_vld[assert_entry] |->
+        !(lsu3_lrq_exx_tlb_wakeup[assert_entry] || lsu3_lrq_frz_clr[assert_entry])
+    ) else $error("LRQ3 entry %0d reused with an old-owner wakeup", assert_entry);
+  end
+endgenerate
+`endif
+
 xx_lsu_compare_iid #(.IID_WIDTH(IID_WIDTH))
 x_lsu_lrq_create_compare_flush_iid_0(
     .x_iid0       ( rtu_ck_flush_iid                  ),

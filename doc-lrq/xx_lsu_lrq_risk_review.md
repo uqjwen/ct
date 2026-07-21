@@ -10,7 +10,7 @@
 |---|---:|---|---|---|
 | LRQ-RR-01 | P2 | 已确认 | 开放 | replay 未保存 `halt_info`，AG 改取当前 IDU 总线 |
 | LRQ-RR-02 | P1 | 合同依赖 | 条件关闭待断言 | no-space 预留和 flush 同步 kill 保证 create/pop 原子性 |
-| LRQ-RR-03 | P1 影响 | 源码+合同 | 未发现具体 bug，条件关闭 | 无 generation tag 不是缺陷；可见 producer 在 entry 复用前清除旧 owner，保留集成断言 |
+| LRQ-RR-03 | P1 影响 | 源码+合同 | 本地断言已实现，精确 owner 待绑定 | 无 generation tag 不是缺陷；live/reuse 可见边界已监测，producer owner-IID 仍需集成元数据 |
 | LRQ-RR-04 | P3 | 源码+合同 | 功能关闭/功耗意图 | 非 US create 保留旧高位 mask，但完整 replay 消费链以 saved `inst_us` 资格化 |
 | LRQ-RR-05 | P3 | 已给定配置 | 约束项 | 多处表达式要求 `LRQENTRY>=LSIQENTRY`，正式配置又要求二者相等 |
 
@@ -53,7 +53,7 @@ Interaction 1.4 补齐的 producer 进一步缩小了本项：
 
 因此没有发现这些 producer 在 flush 后继续保存旧 entry bit 的本地路径。valid 的 flush 优先级和 allocator 的拍前 valid 又保证被 kill 的 entry 不能在同一拍分配给新 owner。需要注意，LRQ 的“释放”条件在源码中仍是 DA terminal/non-restart pop，而不是所有类型都先看到 WB completion；wrapper 边界也不携带 IID。
 
-当前结论是“未发现具体设计 bug，按生命周期合同条件关闭”：RTL 不必增加 generation tag；验证环境用 `{lane,lrqid,IID,observer_generation}` 作为观察键，并断言 `wakeup[bit] -> entry_vld[bit] && producer_owner_iid == entry_iid`、`create_accept(bit) -> no old-owner producer pending`。若这些断言失败，再修相应 producer 或引入 generation 防护。
+当前结论是“未发现具体设计 bug，按生命周期合同条件关闭”：RTL 不必增加 generation tag。Interaction 1.6 已在 LRQ 内实现 `wakeup[bit] -> entry_vld[bit]` 和 `create_accept(bit) -> no same-bit visible old wakeup`。验证环境仍须用 `{lane,lrqid,IID,observer_generation}` 作为观察键，补证 `producer_owner_iid == entry_iid` 与所有旧 producer pending 已清空；若这些断言失败，再修相应 producer 或引入 generation 防护。
 
 ### LRQ-RR-04：非适用 payload 保留旧 entry 数据
 
@@ -75,3 +75,12 @@ replay lch entry 用 `{{LRQENTRY-LSIQENTRY{1'b0}}, ...}` 扩展（`srcs/xx_lsu_l
 2. 将 IDU pop 和 age update 收敛到真实 `create_accept`，并增加容量预留/flush-kill 断言。
 3. 在已补齐的 MMU/LFB/SQ/WMB 与 LRQ 边界绑定 entry-bit/IID owner-lifetime；observer generation 只放在 scoreboard，另补 IDU/SFP 合同。
 4. 对保留的非适用 payload 绑定“不消费”断言，并增加参数静态检查。
+
+## 6. Interaction 1.6：LRQ-RR-03 的 RTL 断言
+
+本轮已在 LRQ allocator 之后加入 synthesis-excluded generate SVA，lane0/2/3 每个 bit 均检查：
+
+1. `exx_tlb_wakeup || frz_clr` 蕴含对应 `entry_vld`；
+2. `lrq*_create_vld` 蕴含该 bit 没有同拍 `exx_tlb_wakeup/frz_clr`。
+
+这关闭了 LRQ 本地可见的“唤醒空 entry”和“复用拍仍有旧可见事件”缺口。当前 allocator 只选择拍前 invalid entry，所以第二条在现实现下可由第一条与 allocator 不变量推出；独立保留主要用于诊断和防止未来复用时序改动。LRQ entry 内部保存 IID，但 producer 端口没有 owner IID；因此不能把现有断言误写成完整 owner equality 证明。LRQ-RR-03 的最终条件仍是集成验证层为各 producer 提供 owner IID/pending，并在 entry 复用前证明旧 generation 清空。

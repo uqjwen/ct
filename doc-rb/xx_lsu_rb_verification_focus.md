@@ -10,7 +10,7 @@
 |---|---|---|
 | RB-V01 | 普通区 0/1/2/3 空位及 MMU 保留位，三 lane create 全组合 | 每个 success 有唯一 pointer；普通请求不占 MMU 保留位；无 accept-zero-pointer |
 | RB-V02 | 0/1/2/3 个空位，三 lane 的 `judge/dp/vld` 合法及非法组合；高优先级 dp 有效但 create 失败 | 合同非法组合立即报错；任一低优先级成功 entry 的 payload/IID 必来自该 winner，不被更高优先级 dp 污染 |
-| RB-V03 | 每个状态注入 partial/full/async flush，再以最早合法拍复用 entry/ID | request 前立即 kill；request 后旧 response被 drain、tombstone 吸收或禁止 ID 复用；旧 owner 不击中新 entry |
+| RB-V03 | 每个状态注入 partial/full/async flush；分别覆盖 debug-only 停机和可恢复 resume | partial/full flush 保持普通 owner 合同；debug-only async flush可永久无响应并进入 debug；resume 时必须先复位/隔离总线或 drain/tombstone，旧 owner 不击中新 entry |
 | RB-V04 | WMB sync/fence/atomic AW grant 前后、RB AR grant 前后排列 B response；共享 B ID 前导/迟到噪声负向注入 | paired transaction 的早到 B 可在 RB WAIT_RESP 前合法捕获；未接受 paired write 或 owner 不匹配的 B 必须被拒绝/触发 assertion |
 | RB-V05 | US 两 beat正常、缺 beat、多 beat、错 ID、错误 response；CA=0/SO 的 US 请求 | 合法请求严格 beat0/beat1；非法属性在进入 RB 前报 `access_fault_with_page`；协议负向激励触发断言 |
 | RB-V06 | boundary first/merge/secd，各 beat bus error | 数据 merge、byte mask、exception、mtval、一次 completion/data 正确 |
@@ -75,4 +75,10 @@ assert property (@(posedge lsu_special_clk) disable iff (!cpurst_b)
 
 ## 4. Sign-off
 
-所有状态边、request 类型、flush 点、response 排列和容量边界均覆盖；旧 owner response 0 次命中新 entry；create winner/payload identity 与 WB one-hot assertion 0 failure；RTU/LFB drain 或 tombstone、BIU US 两拍、非法属性错误映射及 paired WMB/RB 固定 ID 唯一 outstanding 合同书面确认后方可签核。
+所有状态边、request 类型、flush 点、response 排列和容量边界均覆盖；create winner/payload identity 与 WB one-hot assertion 0 failure；BIU US 两拍、非法属性错误映射及 paired WMB/RB 固定 ID 唯一 outstanding 合同书面确认。debug-only hang recovery 只要求可靠进入 debug；若支持 resume，另要求旧 owner response 0 次命中新 entry并提供 RTU/LFB drain、tombstone 或总线复位证明。
+
+## 5. Interaction 1.6 豁免后的验证边界
+
+- debug-hang 用例允许 async flush 后旧 RB transaction 永久无响应，但必须成功进入可观察 debug 状态。
+- 如果测试包含 debug resume，则必须先复位/隔离 interconnect，或证明旧 RID/BID 被 tombstone；否则不能引用 RB-RR-02 豁免。
+- RB-RR-04 的 waiver 记录必须附 C910 签核来源和本工程 ID 编码/唯一 outstanding 等价检查；没有这两项时继续运行 paired WMB/RB B-response owner assertion。

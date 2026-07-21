@@ -1916,6 +1916,18 @@ assign ldc_hit_way3       = ldc_dcache_valid3
                              &&  ldc_way3_tag_hit; 
 
 assign ldc_hit_way        = {ldc_hit_way3,ldc_hit_way2,ldc_hit_way1,ldc_hit_way0};
+
+`ifndef SYNTHESIS
+// DC-RR-03: a cacheable live load may miss (zero bits), but it must never hit
+// more than one way.  A multi-hit means duplicate valid tags or a coherence/tag
+// maintenance failure and must be reported at the point where it is observed.
+a_ldc_hit_way_onehot0: assert property (
+  @(posedge forever_cpuclk) disable iff (!cpurst_b)
+    (ldc_ex2_inst_vld && ldc_lda_ex2_page_ca && cp0_lsu_dcache_en)
+    |-> $onehot0(ldc_hit_way)
+) else $error("DC-RR-03: cacheable load hit multiple D-cache ways");
+`endif
+
 // &Force("output","ldc_lda_ex2_dcache_hit"); @947
 assign ldc_lda_ex2_dcache_hit     = ldc_hit_way0  ||  ldc_hit_way1 || ldc_hit_way2 || ldc_hit_way3;
 
@@ -2276,5 +2288,4 @@ end
 //==========================================================
 // &ModuleEnd; @1244
 endmodule
-
 

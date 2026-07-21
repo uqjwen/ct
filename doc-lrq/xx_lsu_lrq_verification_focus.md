@@ -88,3 +88,7 @@ lane2/lane3 必须复制同类 assertion；参数层增加 `initial assert (LRQE
 - 所有 bank 的 empty→full→empty、同拍三 create、同拍三 pop、create+pop 都命中。
 - 适用 replay payload X-prop 0 failure；旧 `no_spec` 只按 interaction 1.1.3 的 SFP/IDU 非消费合同检查。
 - LRQ-RR-01 修复，容量预留/flush-kill/accept-pop 一致，DA/MMU/LFB/SQ/WMB bitmap 所有权通过，旧 owner wakeup 0 次，非 US 高位 mask 0 次消费，assertion 0 failure 后方可 sign-off。
+
+## 5. Interaction 1.6 回归补充
+
+先运行 `python3 -m unittest tests/test_interaction_1_6_assertions.py`，确认 6 组 LRQ 断言没有被后续重构删除或弱化。动态环境再做以下负向注入：对 live bit 注入错误 owner IID 的 wakeup时，本地 `wakeup->entry_vld` 会通过，但 producer-owner bind 必须失败；对已释放 bit 注入 wakeup时，本地断言必须立即失败；对 create 同拍注入旧 wakeup时，reuse 断言必须失败。

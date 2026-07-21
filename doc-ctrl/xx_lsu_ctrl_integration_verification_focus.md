@@ -58,3 +58,12 @@ assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
 ## 5. Sign-off
 
 父/子时钟覆盖 assertion 0 failure；旧 owner wakeup 0 次生效；lane0/2/3 全来源交叉覆盖；VMB 修正和 ICC/LSDA 剩余门控项均验证；LRQ mode 外部合同和参数相等合同书面确认；完整环境 elaboration 通过后方可最终签核。
+
+## 6. Interaction 1.6 已实现与待绑定断言
+
+- 已实现：`a_lrq{0,2,3}_wakeup_targets_live_entry`，逐 bit检查 CTRL 汇总后的可见 wakeup 只能命中 live entry。
+- 已实现：`a_lrq{0,2,3}_create_has_no_visible_old_wakeup`，逐 bit检查 create-accept 拍没有同位旧 wakeup。
+- 待完整 SoC bind：每个 producer 分别提供 `{pending, owner_iid, lrqid}`，并检查 `producer_wakeup -> pending && owner_iid == lrq_entry_iid`。
+- 待完整 SoC scoreboard：create-accept 前，MMU/LFB/SQ/WMB/DA/LSDA 中该 bit 的旧 generation pending 均已清除。
+
+源文件回归 `python3 -m unittest tests/test_interaction_1_6_assertions.py` 已覆盖断言存在性与核心蕴含式；最终 sign-off 仍要求 SVA compile/elaboration 和动态/formal 0 failure。
