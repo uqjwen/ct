@@ -56,3 +56,11 @@
 10. 针对WB-RR-01/02，请参考代码修改
 11. 针对WB-RR-04，添加了xx_lsu_wb_arbiter代码
 ***
+# interaction 1.6
+***
+1. 针对CTRL-RR-03，是否能提供断言wakeup[bit] -> entry_vld[bit] && producer_owner_iid == entry_iid、create_accept(bit) -> no old-owner producer pending的写法？在代码中实现并注释。
+2. 针对DC-RR-03, 请直接在代码中实现断言，并注释。
+3. 针对RB-RR-02，异步flush确实没有要求cmit态的请求数据响应。该异步flush是debug模块发起，对outstanding请求响应不做要求，应用场景是由于outstanding请求长期没有响应等原因导致处理器核卡死，通过异步flush进入debug模式查看处理器核状态。
+4. 针对WB-RR-04，RB-RR-04都是继承C910设计，如果C910设计证明没有错误，则可以waive。
+5. 在原本设计中，xx_lsu_ld_ag栈，如果发生dcache反压等原因发生lag_ex1_stall_ori，通过lsu_mmu_abort中断mmu访问；事实证明这样设计会导致该逻辑相关的时序逻辑级数过高。因此lag_ex1_stall_ori期间，仍允许访问mmu，如果发生tlbmiss，pagefault，access-fault，则将其记录下来（lag_bkcon_stall_vld，lag_bkcon_tlbmiss, lag_bkcon_pgfault，lag_mmu_acfault），如果是lag_bkcon_tlbmiss则通过将信号ld_ag_stall_vld置0，信号ld_ag_stall_restart置1，将ex1栈无效化；如果是page-fault或者ac-fault则通过lsu_mmu_abort不再发送mmu请求，并将相应的错误传递（lag_ldc_ex1_expt_page_fault，lag_ldc_ex1_expt_vld），请注意mmu_lsu_access_fault需要在发送mmu访问请求的下一拍知道结果；另外多余unite-stride，由于需要访问512位宽，因此需要在lag栈获得命中路信息，以便访问对应路的512数据，因此需要停顿2拍，第一拍停顿是为了访问tag（lag_us_tag_req_stall），第二拍将命中路信息（lag_us_tag_hit_way）打一拍（lag_us_tag_req_success_flop）。期间如果发生tlbmiss，pagefault，accessfault，处理方法和上面相同。请检查这么设计是否有功能上的设计错误。
+***
