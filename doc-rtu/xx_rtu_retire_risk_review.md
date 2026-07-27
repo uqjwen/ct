@@ -2,7 +2,7 @@
 
 ## 1. 审查范围与基线
 
-- 被审文件：`srcs/xx_rtu_retire.v`，仓库基线 `acf8463addbedc8c07f24be526e6eba429149741`。
+- 被审文件：`srcs/xx_rtu_retire.v`；初审基线 `acf8463addbedc8c07f24be526e6eba429149741`，Interaction 1.8 纠偏复核基线 `4a8223a2d80a5da6a7198c6fc89d97790b9729c3`。
 - 参考文件：OpenC910 `C910_RTL_FACTORY/gen_rtl/rtu/rtl/ct_rtu_retire.v`，参考提交 `b91c90914c19f114d35c8f6b73408eb241ed847c`。
 - 方法：逐项比较异常、flush、门控时钟、debug、六发射扩展、向量 CSR 更新和性能计数路径；另做端口/声明一致性、输出驱动、0～5 lane 完整性、跨 lane 引用和未使用信号扫描。
 - 限制：仓库未提供可独立 elaboration 的完整 RTU 依赖、宏定义和 testbench，因此本报告完成的是静态审查；动态关闭条件见配套验证方案。
@@ -12,7 +12,7 @@
 | ID | 优先级 | 状态 | 结论 |
 |---|---:|---|---|
 | RTU-RR-01 | P1 | 已确认 | 异步异常在两个关键门控使能中漏项，空闲核上可能丢失 IFU 异常寄存和 ROB flush 的门控资格。 |
-| RTU-RR-02 | P1 | 已确认，配置相关 | MMU 开启时，取指异常 `mtval` 和 debug `tval` 对高半区 canonical PC 仍做零扩展；若允许高半区虚拟地址，值错误。 |
+| RTU-RR-02 | P1 | 已确认 | 跨页 32-bit 指令的高半字异常地址把“半字地址”直接当成“字节地址”加 2，`mtval` 无条件错误；此外高半区 canonical PC 仍有独立的符号扩展缺陷。 |
 | RTU-RR-03 | P2 | 合同依赖 | DTU 同步/组 halt、sync flush、resume 若仅脉冲一拍，保存请求下一拍会被零覆盖；只有 hold-until-consumed 合同才能关闭。 |
 | RTU-RR-04 | P2 | 验证义务 | 六退休扩展的组合路径静态完整，但正确性依赖 ROB 保证 valid 连续、异常只位于 slot0、年轻 slot 不在老指令异常时有效。 |
 | RTU-RR-05 | P2 | 验证义务 | 同拍多个 `vsetvli` 采用 slot5→slot0 的最年轻优先级；静态未发现漏 lane，仍需与 ROB 年龄顺序合同共同验证。 |
@@ -46,22 +46,24 @@ assign retire_inst0_flush_gateclk = ... | retire_async_expt_vld | ...;
 
 这是从参考模块扩展/替换 debug 逻辑时产生的简单漏项，建议按 P1 处理。
 
-### RTU-RR-02：高半区虚拟 PC 的 `mtval/dtval` 没有符号扩展
+### RTU-RR-02：高半字异常地址丢失地址单位转换，并伴随独立的 canonical 扩展缺陷
 
 **证据**
 
-- MMU 开启时的取指异常 `mtval` 在 `srcs/xx_rtu_retire.v:2049`～`2055` 生成。普通取指异常分支只在 PC 前放一个 sign bit，其余高位仍填 0；高半字异常分支使用由窄 PC 零扩展后加 2 得到的 `retire_expt_pc_high_hw_expt`：`srcs/xx_rtu_retire.v:3662`。
-- debug 非 LSU trigger 的 `retire_dtval` 在 `srcs/xx_rtu_retire.v:3552`～`3561` 生成；`cp0_yy_mmu_en` 的 if/else 两个分支完全相同，均为零扩展。
-- 同一文件的 EPC/DPC 已给出正确对照：`rtu_cp0_epc` 在 `srcs/xx_rtu_retire.v:2181`～`2183` 复制 PC sign bit，`retire_dpc` 在 `srcs/xx_rtu_retire.v:3570`～`3574` 也做符号扩展。
-- OpenC910 参考设计在 MMU 开启且非异步异常时复制 `mtval_src` 的最高位到高位。
+1. `rob_retire_inst0_cur_pc` 是删去最低位 0 的半字地址，而不是完整字节地址。同文件普通取指异常路径在 `srcs/xx_rtu_retire.v:2049`～`2051` 使用 `{rob_retire_inst0_cur_pc,1'b0}`，EPC 路径在 `srcs/xx_rtu_retire.v:2181`～`2183` 也明确补回 `1'b0`。
+2. 高半字路径却在 `srcs/xx_rtu_retire.v:3662` 直接执行 `rob_retire_inst0_cur_pc + 64'd2`，既没有先左移一位恢复字节地址，又在错误的地址单位上加了 2。
+3. 例如 32-bit 指令从字节地址 `0xFFE` 开始，保存的 `cur_pc` 为 `0x7FF`。当前表达式给出 `0x7FF + 2 = 0x801`，而发生异常的高半字实际位于 `0x1000`；正确计算应为 `{0x7FF,1'b0} + 2 = 0x1000`。因此用户指出的“未左移 1”就是本项的主要设计 bug，且只要走跨页高半字异常路径就会发生，不依赖高/低半区地址配置。
+4. 另有一个彼此独立的缺陷：MMU 开启时，普通取指异常 `mtval` 在 `srcs/xx_rtu_retire.v:2049`～`2055` 只复制一次 sign bit，其余高位补 0；debug 非 LSU trigger 的 `retire_dtval` 在 `srcs/xx_rtu_retire.v:3552`～`3561` 也始终零扩展。`rtu_cp0_epc`（`srcs/xx_rtu_retire.v:2181`～`2183`）和 `retire_dpc`（`srcs/xx_rtu_retire.v:3570`～`3574`）已经给出 canonical 符号扩展的正确对照。
+5. OpenC910 参考设计会在 MMU 开启且非异步异常时复制 `mtval_src` 的最高位到高位，支持上述 canonical 扩展判断；但它不能消除本仓库新增高半字辅助表达式中的地址单位错误。
 
 **影响边界**
 
-若实现允许 `PC[WK_PC_LEN-1]=1` 的高半区 canonical 地址，则 instruction page/access fault 的 `mtval` 和 PC 类 debug `tval` 会落入错误的低地址；异常处理程序和调试器得到错误现场。若系统书面限制只执行低半区虚拟地址，该问题可降为 P2，但表达式本身仍是复制/扩展笔误。
+- 地址单位错误：跨页 32-bit 指令的后半字触发 instruction page/access fault 时，`mtval` 不是 faulting virtual address。OS 按错误 `mtval` 查页、判断故障地址或生成信号时可能错误终止进程；该风险对低半区地址同样成立。
+- canonical 扩展错误：若实现允许 `PC[WK_PC_LEN-1]=1` 的高半区虚拟地址，普通 instruction page/access fault 的 `mtval` 和 PC 类 debug `tval` 还会落入错误低地址。若系统书面限制只执行低半区，可单独降低这一子项优先级，但不能关闭前述地址单位错误。
 
 **建议修复**
 
-统一复用 EPC/DPC 的 canonical 扩展方式；高半字异常应先在 `WK_PC_LEN+1` 有符号/地址域内计算 `PC+2`，再按 MMU 模式扩展到 64 bit。增加高半区最后半字跨页测试。
+先用 `{rob_retire_inst0_cur_pc,1'b0}` 恢复字节地址，再加 `64'd2`，随后统一复用 EPC/DPC 的 canonical 扩展方式。不要只把常数 2 改为 1：虽然 `{cur_pc + 1'b1,1'b0}` 在普通范围内数值等价，但“恢复字节地址后加 2”更清楚，也更容易用 reference model 检查。增加页末 `0xFFE`、高/低半区和 MMU 开/关交叉测试，并断言高半字 `mtval` 等于 canonical byte PC 加 2。
 
 ### RTU-RR-03：一拍 DTU 请求可能在可消费前被清除
 

@@ -10,8 +10,8 @@
 |---|---|---|---|---|
 | RTU-V01 | RTU-RR-01 | 流水线完全空闲后产生 LSU async exception，关闭其它 retire/debug/change-flow 时钟来源 | `retire_async_expt_vld` 同拍打开 retire clock 和 ROB flush gate；下一拍 IFU/CP0 收到 cause=5 和正确地址 | 门级 ICG 仿真通过，连续 1000 次随机空闲间隔零丢失 |
 | RTU-V02 | RTU-RR-01 | async exception 与 normal retire、flush FSM 非空闲、debug halt 分别同拍 | 优先级唯一；异常不重复，flush FSM 最终回 idle | 所有交叉覆盖命中且 assertion 零失败 |
-| RTU-V03 | RTU-RR-02 | MMU 开启，低半区/高半区 PC 的 instruction page/access fault | EPC、MTVAL 均为同一 canonical PC；高半区高位全为 sign bit | 软件参考模型逐 bit 一致 |
-| RTU-V04 | RTU-RR-02 | 32-bit 指令末 16 bit 位于下一页，高半区和低半区各测一次 | `mtval=PC+2` 且 canonical 扩展正确 | 页边界矩阵全部通过 |
+| RTU-V03 | RTU-RR-02 | MMU 开启，低半区/高半区 PC 的普通 instruction page/access fault | EPC、MTVAL 均为同一 canonical 字节 PC；高半区高位全为 sign bit | 软件参考模型逐 bit 一致 |
+| RTU-V04 | RTU-RR-02 | 32-bit 指令从字节地址 `0xFFE` 等页末半字开始，令下一页高半字异常；高半区和低半区各测一次 | 输入半字地址 `cur_pc=0x7FF` 时，`mtval=0x1000`，绝不能得到当前错误值 `0x801`；其它地址满足 canonical byte PC `+2` | 页边界矩阵全部通过 |
 | RTU-V05 | RTU-RR-02 | trigger t0 IFU、t1 LSU、普通 debug halt，MMU 开/关交叉 | IFU/PC 型 TVAL 用 canonical PC，LSU 型 TVAL 保留访问地址 | DTU scoreboard 零错配 |
 | RTU-V06 | RTU-RR-03 | 同步 halt/group halt/sync flush/resume 只脉冲 1 拍，ROB 分别空闲 0/1/N 拍 | 若合同允许脉冲，请求保持到消费；若要求 level，接口断言应立即拒绝非法脉冲 | DTU hold-until-consumed 合同或 sticky RTL 明确并证明 |
 | RTU-V07 | RTU-RR-04 | 1～6 条连续退休，slot0 注入 exception、t0 halt、inst flush | exception/halt 包中年轻 slot 无任何 PST/IFU/HPCP/DTU 副作用 | ROB 合同 assertion 和副作用 scoreboard 均通过 |
@@ -61,6 +61,12 @@ assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
   dtu_rtu_sync_halt_req && !rtu_dtu_halt_ack
   |=> dtu_rtu_sync_halt_req || rtu_dtu_halt_ack);
 
+// RTU-RR-02：cur_pc 是半字地址；高半字异常必须先补 bit0，再加 2。
+a_high_half_mtval_uses_byte_address:
+assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
+  retire_expt_pc_high_hw
+  |-> retire_expt_tval == canonical_byte_pc(rob_retire_inst0_cur_pc) + 64'd2);
+
 // RTU-RR-05：同拍多条 vsetvli 时选择最年轻有效槽。
 a_vsetvli_selects_youngest:
 assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
@@ -70,14 +76,17 @@ assert property (@(posedge forever_cpuclk) disable iff (!cpurst_b)
 PC 扩展建议用 64-bit reference function 检查：
 
 ```systemverilog
-function automatic logic [63:0] canonical_pc(input logic [`WK_PC_LEN-1:0] pc);
-  canonical_pc = cp0_yy_mmu_en
-               ? {{(64-`WK_PC_LEN){pc[`WK_PC_LEN-1]}}, pc}
-               : {{(64-`WK_PC_LEN){1'b0}}, pc};
+function automatic logic [63:0] canonical_byte_pc(
+  input logic [`WK_PC_LEN-1:0] cur_pc
+);
+  canonical_byte_pc = cp0_yy_mmu_en
+                    ? {{(64-`WK_PC_LEN-1){cur_pc[`WK_PC_LEN-1]}},
+                       cur_pc, 1'b0}
+                    : {{(64-`WK_PC_LEN-1){1'b0}}, cur_pc, 1'b0};
 endfunction
 ```
 
-实际 PC 接口以 halfword 为单位时，应先恢复低位 0，再调用等价参考函数。
+这里特意把“半字地址”恢复成“字节地址”；高半字 fault reference 为 `canonical_byte_pc(cur_pc) + 64'd2`。`0xFFE / 0x7FF / 0x801 / 0x1000` 定向用例应保留为防回归测试。
 
 ## 4. 覆盖模型
 
@@ -92,7 +101,7 @@ endfunction
 ## 5. 动态关闭条件
 
 - `RTU-RR-01`：RTL 补齐两处漏项，ICG 仿真证明孤立 async exception 100% 到达 IFU/CP0/ROB。
-- `RTU-RR-02`：高半区 PC 矩阵逐 bit 通过；若系统不支持高半区，提供可执行的地址范围 assertion。
+- `RTU-RR-02`：先证明所有跨页高半字异常均从半字地址正确恢复字节地址并加 2；再让高半区 PC 矩阵逐 bit 通过。若系统不支持高半区，地址范围 assertion 只能关闭独立的 canonical 扩展子项，不能关闭地址单位缺陷。
 - `RTU-RR-03`：提供 DTU level/ack 合同 assertion，或改为 sticky-until-consumed 并通过 N 拍空闲测试。
 - `RTU-RR-04`：ROB 连续 valid、异常只在 slot0、年轻槽被屏蔽的 assertion 全部通过。
 - `RTU-RR-05`：2～6 条同拍 CSR 更新与程序顺序 reference model 一致。

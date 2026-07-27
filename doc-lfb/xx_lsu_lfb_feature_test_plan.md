@@ -1,6 +1,6 @@
 # `xx_lsu_lfb` / `xx_lsu_lfb_addr_entry` 功能点与 Test Plan
 
-范围包含 LFB 地址/数据项分配、RB/PFU create、BIU linefill response、VB replacement、D-cache refill、依赖唤醒和回收。仓库中的 entry 实现为 `xx_lsu_lfb_addr_entry`；数据项控制在 `xx_lsu_lfb` 内展开。
+范围包含 LFB 地址/数据项分配、RB/PFU create、BIU linefill response、VB replacement、D-cache refill、依赖唤醒和回收。仓库提供 `xx_lsu_lfb_addr_entry`，但 `xx_lsu_lfb` 所实例化的 `xx_lsu_lfb_data_entry` 源码缺失；补齐该模块并完成 elaboration 是执行以下 data-entry 测试前的硬性前置条件。
 
 | 二级功能点 | 三级功能点 | 功能点描述 | 测试方法和配置说明 | 优先级 |
 |---|---|---|---|---|
