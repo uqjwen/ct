@@ -69,3 +69,9 @@
 1. 添加了xx_rtu_retire.v模块，该模块从ct_rtu_retire.v模块基础上扩展而来，请详细审查是否存在设计上的错误，或者简单的笔误。
 2. 给xx_lsu_ld_ag/dc/da/wb，xx_lsu_lrq（含entry）, xx_lsu_rb（含entry）, xx_lsu_lq（含entry），xx_lsu_lfb（含entry）等模块生成功能点和test plan，生成文件请按照md格式保存到各自目录（如doc-da，如果目录不存在请创建），功能点请按照以下分栏：二级功能点，三级功能点，功能点描述，测试方法和配置说明，优先级；
 ***
+
+# interaction 1.8
+***
+1. 针对RTU-RR-02，不确定您描述的具体问题，是2054行retire_expt_pc_high_hw_expt直接赋值给mtval，没有左移1位吗？这样如果跨页且高半字出现也错误的话，则mtval并不是出现页错误的虚地址，将导致os可能无法处理而进入段错误。
+2. 如果RTU-RR-02描述的不是上述问题，说明该处bug您没有看出来，据此请重新审查xx_lsu_ld_ag/dc/da/wb，xx_lsu_lrq（含entry）, xx_lsu_rb（含entry）, xx_lsu_lq（含entry），xx_lsu_lfb（含entry）模块的设计潜在bug。
+***
