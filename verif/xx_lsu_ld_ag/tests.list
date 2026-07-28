@@ -1,0 +1,12 @@
+tc_rf_capture_replay
+tc_scalar_va_cross_page
+tc_mmu_hit_miss_abort
+tc_mmu_fault_persistence
+tc_stall_restart_owner
+tc_dcache_bank_requests
+tc_unit_stride_two_phase
+tc_exception_priority
+tc_lrq_create_freeze
+tc_tcm_atomic_commit
+tc_vector_masks
+tc_flush_clock_gating

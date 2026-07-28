@@ -1,0 +1,13 @@
+feature_id,feature,testcase,checker,coverage,priority,closure,result
+AG-FP-01,RF capture and replay,tc_rf_capture_replay,CHK_FP01_OWNER_STABLE,COV_FP01_OWNER,P0,"fresh/replay owner and payload remain coherent across 0/1/N stalls; replay halt-info mismatch is reported",BLOCKED_NO_VCS
+AG-FP-02,Scalar VA and page crossing,tc_scalar_va_cross_page,CHK_FP02_ADDR_MASK,COV_FP02_ADDR_SIZE,P0,"all sizes and low address bits match the 64-bit address/mask model including 4 KiB edges",BLOCKED_NO_VCS
+AG-FP-03,MMU hit miss and abort,tc_mmu_hit_miss_abort,CHK_FP03_MMU_OWNER,COV_FP03_MMU_RESULT,P0,"hit miss abort and replay PA paths each transfer ownership exactly once",BLOCKED_NO_VCS
+AG-FP-04,Page and access fault persistence,tc_mmu_fault_persistence,CHK_FP04_FAULT_TRANSFER,COV_FP04_FAULT_DELAY,P0,"same-cycle PF and next-cycle AF survive 1/N backpressure; downstream integration proves speculative cache reads have no architectural side effect",BLOCKED_NO_VCS
+AG-FP-05,Stall restart arbitration,tc_stall_restart_owner,CHK_FP05_RESTART_OWNER,COV_FP05_STALL_REASON,P0,"each crossed stall reason has exactly one hold freeze or restart outcome",BLOCKED_NO_VCS
+AG-FP-06,D-cache tag data banks,tc_dcache_bank_requests,CHK_FP06_DC_REQ_VALID,COV_FP06_BANK_INDEX,P1,"all bank offsets and cacheability states produce the modeled request/index without invalid consumption",BLOCKED_NO_VCS
+AG-FP-07,Unit-stride tag and way,tc_unit_stride_two_phase,CHK_FP07_US_SEQUENCE,COV_FP07_US_WAY,P0,"four one-hot ways miss and multi-hit execute the two-phase sequence; cross-line contract is checked",BLOCKED_NO_VCS
+AG-FP-08,Exception priority,tc_exception_priority,CHK_FP08_EXCEPTION_AGGREGATES,COV_FP08_EXCEPTION_KIND,P0,"misalign PF and AF feed aggregate valid while LDAMO-not-CA uses its dedicated atomic-qualified encoding",BLOCKED_NO_VCS
+AG-FP-09,LRQ create and freeze,tc_lrq_create_freeze,CHK_FP09_LRQ_OWNER,COV_FP09_LRQ_STATE,P0,"fresh creates once replay never duplicates and accepted miss stays frozen until owner wakeup",BLOCKED_NO_VCS
+AG-FP-10,TCM and atomic commit,tc_tcm_atomic_commit,CHK_FP10_ATOMIC_COMMIT,COV_FP10_SPECIAL_SOURCE,P1,"TCM tie-off is explicit and atomic/LR commit timing selects one request path",PENDING_FULL_CHIP
+AG-FP-11,Vector split and masks,tc_vector_masks,CHK_FP11_VECTOR_KNOWN,COV_FP11_VECTOR_MODE,P1,"legal split vmew vl and mask combinations are known and match standalone helper contract",PENDING_FULL_CHIP
+AG-FP-12,Flush and clock gating,tc_flush_clock_gating,CHK_FP12_FLUSH_CLEARS,COV_FP12_FLUSH_POINT,P0,"flush at capture pending stall create and accept removes owner and late side effects under ICG modes",BLOCKED_NO_VCS
