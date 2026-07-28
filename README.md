@@ -75,3 +75,8 @@
 1. 针对RTU-RR-02，不确定您描述的具体问题，是2054行retire_expt_pc_high_hw_expt直接赋值给mtval，没有左移1位吗？这样如果跨页且高半字出现也错误的话，则mtval并不是出现页错误的虚地址，将导致os可能无法处理而进入段错误。
 2. 如果RTU-RR-02描述的不是上述问题，说明该处bug您没有看出来，据此请重新审查xx_lsu_ld_ag/dc/da/wb，xx_lsu_lrq（含entry）, xx_lsu_rb（含entry）, xx_lsu_lq（含entry），xx_lsu_lfb（含entry）模块的设计潜在bug。
 ***
+# interaction 1.9
+***
+1. 请以xx_lsu_ld_ag模块为例，基于VCS构建验证环境，编写测试激励，针对所列出的功能点和测试计划，对该模块进行测试，达到测试目的，找出现在设计错误。并提供验证完备性，证明所述功能点都得到验证。对验证环境进行简单说明，特别是运行方法。
+2. 针对RTU-RR-02问题，还是不明白“canonical 扩展错误”的问题，请以实际例子，描述mtval设置错误的场景。
+***
