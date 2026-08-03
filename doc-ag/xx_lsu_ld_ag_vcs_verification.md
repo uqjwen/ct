@@ -1,11 +1,12 @@
-# `xx_lsu_ld_ag` VCS 验证环境与结果
+# `xx_lsu_ld_ag` VCS 验证环境、详细测试计划与结果
 
 ## 1. 验证目标与基线
 
-- README 任务：interaction 1.9 第 1 项。
+- README 任务：interaction 1.9 第 1 项及 interaction 2.0 的详细化要求。
 - RTL 基线：`eed0c287fae12ab41372a109c49ab422bc84040b`。
 - DUT：未修改的 `srcs/xx_lsu_ld_ag.sv`。
 - 功能基线：`doc-ag/xx_lsu_ld_ag_feature_test_plan.md` 的 12 行功能点。
+- 详细计划：`verif/xx_lsu_ld_ag/detailed_test_plan.csv` 的48个逐拍场景。
 - 验证方法：directed stimulus、确定性 random 循环、scoreboard、
   SystemVerilog assertion、cover property、VCS code/assert coverage 和
   URG merge。
@@ -49,7 +50,35 @@ AG-FP-10/11 保持 `PENDING_FULL_CHIP`，完整工程应替换为生产定义后
 | `tb/xx_lsu_ld_ag_assertions.sv` | 12 组 checker 和 12 组 cover property |
 | `tb/xx_lsu_ld_ag_tb.sv` | 12 个 testcase、driver、scoreboard、known-finding 记录 |
 | `coverage_matrix.csv` | 功能点到 testcase/checker/coverage/result 的追踪矩阵 |
+| `detailed_test_plan.csv` | 48个“精确信号条件 → 逐拍预期结果”场景 |
 | `tests.list` | 回归 testcase 清单 |
+
+### 3.1 interaction 2.0 的场景实现合同
+
+`coverage_matrix.csv` 保留12个功能级锚点，`detailed_test_plan.csv` 把每个
+锚点展开为4个场景。每一行均提供：
+
+1. `setup`：复位、owner、地址和MMU/D-cache配置；
+2. `drive_signals`：需要从driver赋值或force的精确信号名；
+3. `cycle_sequence`：从C0开始的驱动与C1/C2/C3采样点；
+4. `trigger_condition`：以“当”开头、可转为sequence antecedent的条件；
+5. `expected_signals` 和 `expected_result`：以“则”开头的检查对象和值；
+6. 父级 testcase、checker、cover property、关闭标准和执行边界。
+
+工程师实现一行时，不新建另一套顶层环境，而是在该行 `testcase` 指定的
+现有task内增加driver/scoreboard步骤。例如 `AG-FP-03-S02` 落入
+`tc_mmu_hit_miss_abort`：C0驱动 `mmu_lsu_pa_vld=0`，C1检查
+`lag_ldc_ex1_utlb_miss=1` 和 `lag_ldc_ex1_inst_vld=0`。完成后运行：
+
+```bash
+make -C verif/xx_lsu_ld_ag run TEST=tc_mmu_hit_miss_abort SEED=19
+```
+
+“48个场景已详细定义”不等于“48个子场景已全部编码并动态执行”。当前12个
+testcase task是feature级执行入口，包含interaction 1.9的代表性激励；新增
+子场景应按CSV逐行扩展并在有VCS的主机执行。未获得实际日志和VDB之前，结果
+继续使用 `BLOCKED_NO_VCS`；依赖生产TCM/vector helper的场景使用
+`PENDING_FULL_CHIP`。
 
 ## 4. 运行方法
 
@@ -80,9 +109,10 @@ python3 verif/xx_lsu_ld_ag/tools/check_completeness.py
 python3 verif/xx_lsu_ld_ag/tools/reference_model.py
 ```
 
-`make preflight` 会确认 258 个端口没有漂移、12/12 功能点完整映射，并
-执行 211 个 reference cases。任何缺少的 testcase/checker/coverage
-条目都会使命令非零退出。
+`make preflight` 会确认 258 个端口没有漂移、12/12 功能点完整映射、
+48个详细场景均有合法父项/信号/逐拍条件/文档映射，并执行211个reference
+cases。任何缺少的 testcase/checker/coverage、错误的场景编号、未知信号、
+不连续场景或缺少“当/则”合同都会使命令非零退出。
 
 ### 4.2 VCS 编译
 
@@ -161,9 +191,10 @@ make -C verif/xx_lsu_ld_ag clean
 | AG-FP-11 | `tc_vector_masks` | `CHK_FP11_VECTOR_KNOWN` | `COV_FP11_VECTOR_MODE` | `PENDING_FULL_CHIP` |
 | AG-FP-12 | `tc_flush_clock_gating` | `CHK_FP12_FLUSH_CLEARS` | `COV_FP12_FLUSH_POINT` | `BLOCKED_NO_VCS` |
 
-这里的“12/12”表示**结构追踪完备**：每一项都有激励、检查、覆盖目标和
-关闭标准。它不表示已经取得 100% functional/code coverage。本机没有
-VCS/URG，真实覆盖率只能在上述命令完成后由 URG 报告证明。
+这里的“12/12”和“48”表示**结构追踪及计划描述完备**：每一项都有明确
+激励条件、逐拍预期、检查、覆盖目标和关闭标准。它不表示已经取得100%
+functional/code coverage，也不表示48个详细子场景已经全部动态执行。本机
+没有VCS/URG，真实覆盖率只能在上述命令完成后由URG报告证明。
 
 动态签核还要求：
 
@@ -217,6 +248,7 @@ AG-FP-10/11 必须在完整工程重跑。
 | `command -v vcs/urg/verdi` | 均未找到 |
 | 自动 wrapper | 258/258 ports 一致 |
 | feature traceability | 12/12 rows 有 testcase/checker/coverage/closure |
+| detailed scenario plan | 48 rows；每个功能点4行，信号与父项机械校验通过 |
 | reference model | 211 cases 通过，3 个源码 finding 被机械确认 |
 | VCS compile/simulation | `BLOCKED_NO_VCS` |
 | URG functional/code coverage | `BLOCKED_NO_VCS` |
