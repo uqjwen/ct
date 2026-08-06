@@ -1,3 +1,6 @@
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -7,7 +10,7 @@ from verif.common.tools.scenario_contract import (
     validate_environment,
 )
 
-from tests.interaction_2_1_support import make_contract
+from tests.interaction_2_1_support import copy_fixture_env, make_contract, run_gen
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -65,6 +68,29 @@ class ScenarioContractTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ContractError, "undeclared dependency stub"):
             validate_environment(fixture)
+
+
+class EnvironmentGenerationTests(unittest.TestCase):
+    def test_generator_check_detects_stale_interface(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            env = copy_fixture_env(Path(temporary_directory))
+            (env / "tb/demo_if.sv").write_text("stale", encoding="utf-8")
+
+            completed = run_gen(env, check=True)
+
+        self.assertNotEqual(0, completed.returncode)
+        self.assertIn("generated file is stale", completed.stderr)
+
+    def test_aggregate_preflight_names_each_environment(self) -> None:
+        completed = subprocess.run(
+            [sys.executable, "verif/common/tools/preflight.py", "--all"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        self.assertIn("AG_PREFLIGHT_PASS", completed.stdout)
 
 
 if __name__ == "__main__":

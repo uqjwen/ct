@@ -1,0 +1,21 @@
+{
+  "env_name": "demo",
+  "dut_module": "demo",
+  "dut_source": "rtl/demo.sv",
+  "feature_doc": "demo.md",
+  "runbook": "runbook.md",
+  "feature_prefix": "DEMO",
+  "expected_features": 1,
+  "min_scenarios_per_feature": 1,
+  "clock": "clk",
+  "reset": "reset_n",
+  "parameters": {
+    "WIDTH": 8
+  },
+  "idle_overrides": {
+    "demo_in": "'0"
+  },
+  "production_sources": [],
+  "declared_stubs": [],
+  "stub_results": {}
+}

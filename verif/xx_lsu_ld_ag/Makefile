@@ -14,12 +14,12 @@ VCS_FLAGS ?= -full64 -sverilog -timescale=1ns/1ps -debug_access+all \
 .PHONY: preflight generate compile run regress coverage clean
 
 preflight:
-	cd $(REPO_ROOT) && python3 verif/xx_lsu_ld_ag/tools/gen_dut_if.py --check
+	cd $(REPO_ROOT) && python3 verif/common/tools/preflight.py --env xx_lsu_ld_ag
 	cd $(REPO_ROOT) && python3 verif/xx_lsu_ld_ag/tools/check_completeness.py
 	cd $(REPO_ROOT) && python3 verif/xx_lsu_ld_ag/tools/reference_model.py
 
 generate:
-	cd $(REPO_ROOT) && python3 verif/xx_lsu_ld_ag/tools/gen_dut_if.py
+	cd $(REPO_ROOT) && python3 verif/common/tools/gen_env.py --env xx_lsu_ld_ag
 
 compile: preflight
 	@command -v $(VCS) >/dev/null 2>&1 || { \

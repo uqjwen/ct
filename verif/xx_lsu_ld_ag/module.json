@@ -1,0 +1,44 @@
+{
+  "env_name": "xx_lsu_ld_ag",
+  "dut_module": "xx_lsu_ld_ag",
+  "dut_source": "srcs/xx_lsu_ld_ag.sv",
+  "feature_doc": "doc-ag/xx_lsu_ld_ag_feature_test_plan.md",
+  "runbook": "doc-ag/xx_lsu_ld_ag_vcs_verification.md",
+  "feature_prefix": "AG",
+  "expected_features": 12,
+  "min_scenarios_per_feature": 4,
+  "clock": "forever_cpuclk",
+  "reset": "cpurst_b",
+  "parameters": {
+    "LSIQENTRY": 12,
+    "VMBENTRY": 8,
+    "PC_LEN": 15,
+    "IID_WIDTH": 7,
+    "VREG": 6,
+    "PREG": 7
+  },
+  "idle_overrides": {
+    "ctrl_ld_clk": null,
+    "cp0_lsu_dcache_en": "1'b1",
+    "cp0_lsu_icg_en": "1'b1",
+    "cp0_lsu_mm": "1'b1",
+    "mmu_lsu_ca": "1'b1"
+  },
+  "production_sources": [],
+  "declared_stubs": [
+    "gated_clk_cell",
+    "xx_lsu_compare_iid",
+    "xx_lsu_vmask_gen",
+    "xx_lsu_vreg_mask",
+    "xx_lsu_us_bytes_gen",
+    "xx_lsu_ld_vreg_rot"
+  ],
+  "stub_results": {
+    "gated_clk_cell": "PENDING_FULL_CHIP",
+    "xx_lsu_compare_iid": "PENDING_FULL_CHIP",
+    "xx_lsu_vmask_gen": "PENDING_FULL_CHIP",
+    "xx_lsu_vreg_mask": "PENDING_FULL_CHIP",
+    "xx_lsu_us_bytes_gen": "PENDING_FULL_CHIP",
+    "xx_lsu_ld_vreg_rot": "PENDING_FULL_CHIP"
+  }
+}

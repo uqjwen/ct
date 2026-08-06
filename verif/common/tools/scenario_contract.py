@@ -36,7 +36,9 @@ _ALLOWED_RESULTS = frozenset({"BLOCKED_NO_VCS", "PENDING_FULL_CHIP"})
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
 _IDENTIFIER_TOKEN = re.compile(r"\b[A-Za-z_][A-Za-z0-9_$]*\b")
 _BACKTICK = re.compile(r"`([^`]+)`")
-_MODULE_DEFINITION = re.compile(r"\bmodule\s+([A-Za-z_][A-Za-z0-9_$]*)\b")
+_MODULE_DEFINITION = re.compile(
+    r"\b(?:module|interface)\s+([A-Za-z_][A-Za-z0-9_$]*)\b"
+)
 _MODULE_INSTANCE = re.compile(
     r"(?ms)^\s*((?:gated_clk_cell|xx_lsu_[A-Za-z0-9_$]+))\s*"
     r"(?:#\s*\(.*?\)\s*)?[A-Za-z_][A-Za-z0-9_$]*\s*\("
@@ -157,6 +159,12 @@ def _manifest_from_json(path: Path) -> ModuleManifest:
     )
 
 
+def load_manifest(path: Path) -> ModuleManifest:
+    """Load one environment manifest from JSON."""
+
+    return _manifest_from_json(path)
+
+
 def _read_optional(path: Path) -> str:
     return path.read_text(encoding="utf-8") if path.exists() else ""
 
@@ -238,8 +246,12 @@ def load_environment(root: Path, env_name: str) -> EnvironmentContract:
     known_signals.update(port.name for port in ports)
     known_signals.update((manifest.clock, manifest.reset))
 
-    defined = _defined_modules(dut_text, deps_text, *production_texts)
-    instantiated = _instantiated_modules(tb_text, assertion_text, deps_text)
+    defined = _defined_modules(
+        dut_text, tb_text, assertion_text, deps_text, interface_text, *production_texts
+    )
+    instantiated = _instantiated_modules(
+        dut_text, tb_text, assertion_text, deps_text, *production_texts
+    )
     return EnvironmentContract(
         root=root,
         env_dir=env_dir,
@@ -438,15 +450,11 @@ def validate_environment(contract: EnvironmentContract) -> ValidationSummary:
     parents = _validate_feature_rows(contract)
     _validate_detail_rows(contract, parents)
     _validate_runbook(contract)
-    minimum = (
-        contract.manifest.expected_features
-        * contract.manifest.min_scenarios_per_feature
-    )
     return ValidationSummary(
         env_name=contract.manifest.env_name,
         feature_count=len(contract.feature_rows),
         scenario_count=len(contract.detail_rows),
-        minimum_scenarios=minimum,
+        minimum_scenarios=contract.manifest.min_scenarios_per_feature,
         signal_count=len(contract.known_signals),
         declared_stubs=contract.manifest.declared_stubs,
         stub_results=dict(contract.manifest.stub_results),
