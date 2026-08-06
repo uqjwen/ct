@@ -21,13 +21,14 @@
 - Leave workbook columns K–P empty for every data row; do not invent proposer, reviewer, approver, or dates.
 - Remove template examples `张三`, `李四`, `王五`, and `xxx` from workbook data rows.
 - Keep the Office temporary lock file unchanged.
-- Use TDD: observe RED before implementation, then GREEN, and commit each independently reviewable task.
+- Use TDD for executable checkers and workbook behavior: observe RED before implementation, then GREEN. Human-facing prose is reviewed directly and must not be protected by exact-phrase tests.
 
 ## File Responsibility Map
 
 |File|Responsibility|
 |---|---|
-|`tests/test_interaction_2_2_ag_clarification.py`|Mechanically proves signal directions, non-forced outputs, documentation wording, and static/dynamic boundary.|
+|`tests/test_interaction_2_2_ag_clarification.py`|Runs the AG boundary checker and verifies its observable result.|
+|`tools/check_interaction_2_2_ag_boundary.py`|Mechanically proves signal directions, real input stimulus, output observation, and absence of direct DUT-output driving in the target task.|
 |`doc-ag/xx_lsu_ld_ag_feature_test_plan.md`|Explains AG-FP-05-S07 as a DUT scenario and classifies stimulus, internal state, and observed outputs.|
 |`doc-ag/xx_lsu_ld_ag_vcs_verification.md`|Explains the VCS driver/assertion/cover method and why “no force” is verification discipline.|
 |`verif/xx_lsu_ld_ag/tb/xx_lsu_ld_ag_tb.sv`|Retains the existing stimulus and checks; changes only the ambiguous explanatory comment.|
@@ -44,6 +45,7 @@
 
 **Files:**
 - Create: `tests/test_interaction_2_2_ag_clarification.py`
+- Create: `tools/check_interaction_2_2_ag_boundary.py`
 - Modify: `doc-ag/xx_lsu_ld_ag_feature_test_plan.md:91-102`
 - Modify: `doc-ag/xx_lsu_ld_ag_vcs_verification.md:70-90`
 - Modify: `verif/xx_lsu_ld_ag/tb/xx_lsu_ld_ag_tb.sv:362-366`
@@ -51,13 +53,15 @@
 **Interfaces:**
 - Consumes: RTL port directions from `srcs/xx_lsu_ld_ag.sv`
 - Consumes: existing `tc_stall_restart_owner`, `CHK_FP05_MASK_ABORT_REPLAY`, and `COV_FP05_MASK_ABORT_TABLE`
+- Produces: checker marker `AG_FP05_DUT_BOUNDARY_PASS inputs=4 outputs=3`
 - Produces: documentation phrase `AG-FP-05-S07 是 DUT 功能点`
 - Produces: explicit stimulus/internal/output signal classification
 
 - [ ] **Step 1: Write the failing AG clarification test**
 
 ```python
-import re
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -66,48 +70,15 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class Interaction22AgClarificationTests(unittest.TestCase):
-    def test_signal_directions_and_non_forced_output_path(self) -> None:
-        rtl = (ROOT / "srcs/xx_lsu_ld_ag.sv").read_text(encoding="utf-8")
-        tb = (ROOT / "verif/xx_lsu_ld_ag/tb/xx_lsu_ld_ag_tb.sv").read_text(encoding="utf-8")
-        task = re.search(
-            r"task automatic tc_stall_restart_owner\(\);(?P<body>.*?)endtask",
-            tb,
-            re.S,
-        ).group("body")
-
-        for signal in (
-            "mmu_lsu_pa_vld",
-            "mmu_lsu_access_fault",
-            "idu_lsu_rf_older_vld",
-            "lrq_lsu_ex1_lrqid",
-        ):
-            self.assertRegex(rtl, rf"\binput\b[^;]*\b{signal}\b")
-        for signal in (
-            "lsu_mmu_abort",
-            "lsu_lrq_create_frz",
-            "lag_ex1_stall_restart_entry",
-        ):
-            self.assertRegex(rtl, rf"\boutput\b[^;]*\b{signal}\b")
-            self.assertNotIn(f"bus.{signal} =", task)
-
-        self.assertIn("bus.mmu_lsu_access_fault = 1'b1;", task)
-        self.assertIn("expect_true(bus.lsu_mmu_abort", task)
-        self.assertIn("expect_true(!bus.lsu_lrq_create_frz", task)
-        self.assertIn("expect_true(|bus.lag_ex1_stall_restart_entry", task)
-
-    def test_docs_call_it_a_dut_feature_and_keep_dynamic_boundary(self) -> None:
-        feature = (ROOT / "doc-ag/xx_lsu_ld_ag_feature_test_plan.md").read_text(encoding="utf-8")
-        runbook = (ROOT / "doc-ag/xx_lsu_ld_ag_vcs_verification.md").read_text(encoding="utf-8")
-        combined = feature + "\n" + runbook
-        for phrase in (
-            "AG-FP-05-S07 是 DUT 功能点",
-            "DUT 输入",
-            "DUT 内部派生",
-            "DUT 输出",
-            "不直接驱动或 force DUT 输出",
-            "BLOCKED_NO_VCS",
-        ):
-            self.assertIn(phrase, combined)
+    def test_checker_accepts_real_input_to_observed_output_path(self) -> None:
+        completed = subprocess.run(
+            [sys.executable, "tools/check_interaction_2_2_ag_boundary.py"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        self.assertIn("AG_FP05_DUT_BOUNDARY_PASS inputs=4 outputs=3", completed.stdout)
 
 
 if __name__ == "__main__":
@@ -122,9 +93,13 @@ Run:
 python3 -m unittest tests.test_interaction_2_2_ag_clarification -v
 ```
 
-Expected: the signal-direction assertions pass, while the documentation phrase assertions fail because interaction-2.2 wording is absent.
+Expected: FAIL because `tools/check_interaction_2_2_ag_boundary.py` does not exist, so the subprocess returns nonzero.
 
-- [ ] **Step 3: Add the exact AG clarification text**
+- [ ] **Step 3: Implement the AG boundary checker**
+
+Implement a standard-library Python checker that reads the real RTL and testbench, extracts `tc_stall_restart_owner`, and raises `ValueError` unless all four environment signals are RTL inputs, all three target signals are RTL outputs, the task drives the required access-fault stimulus, the task observes all three target outputs, and the task never assigns any target output. Print the deterministic PASS marker only after every check succeeds.
+
+- [ ] **Step 4: Add the exact AG clarification text**
 
 Insert the following section immediately before the AG-FP-05 scenario table in the feature plan, and mirror its verification-method paragraph in the VCS runbook:
 
@@ -144,7 +119,7 @@ Replace the ambiguous testbench comment with:
     // restart bitmap must be produced by the DUT and are observation-only.
 ```
 
-- [ ] **Step 4: Run the focused test and existing AG tests**
+- [ ] **Step 5: Run the focused test and existing AG tests**
 
 Run:
 
@@ -155,10 +130,11 @@ make -C verif/xx_lsu_ld_ag preflight
 
 Expected: both Python test modules pass and AG preflight reports 12 features, 96 scenarios, and 211 reference-model cases with 3 source findings.
 
-- [ ] **Step 5: Commit the AG clarification**
+- [ ] **Step 6: Commit the AG clarification**
 
 ```bash
 git add tests/test_interaction_2_2_ag_clarification.py \
+  tools/check_interaction_2_2_ag_boundary.py \
   doc-ag/xx_lsu_ld_ag_feature_test_plan.md \
   doc-ag/xx_lsu_ld_ag_vcs_verification.md \
   verif/xx_lsu_ld_ag/tb/xx_lsu_ld_ag_tb.sv
@@ -484,42 +460,13 @@ git commit -m "docs: populate CP0 coverage waiver workbook"
 
 **Files:**
 - Create: `docs/interaction-2.2-followup-review.md`
-- Modify: `tests/test_interaction_2_2_ag_clarification.py`
 
 **Interfaces:**
 - Produces report sections: AG conclusion, input/internal/output mapping, CP0 counts, management-field boundary, static evidence, dynamic boundary, and licensed-host commands
 - Consumes checker marker from Task 3
 - Preserves existing interaction 1.6–2.1 test contracts
 
-- [ ] **Step 1: Extend the AG test with a failing report-closure assertion**
-
-```python
-    def test_followup_report_closes_both_readme_items(self) -> None:
-        report = (ROOT / "docs/interaction-2.2-followup-review.md").read_text(encoding="utf-8")
-        for phrase in (
-            "AG-FP-05-S07 是 DUT 功能点",
-            "环境输入",
-            "DUT 内部派生",
-            "DUT 输出",
-            "code_rows=45",
-            "function_rows=0",
-            "K–P",
-            "BLOCKED_NO_VCS",
-        ):
-            self.assertIn(phrase, report)
-```
-
-- [ ] **Step 2: Run the focused test and confirm RED**
-
-Run:
-
-```bash
-python3 -m unittest tests.test_interaction_2_2_ag_clarification.Interaction22AgClarificationTests.test_followup_report_closes_both_readme_items -v
-```
-
-Expected: FAIL with `FileNotFoundError` for the follow-up report.
-
-- [ ] **Step 3: Write the evidence report**
+- [ ] **Step 1: Write the evidence report**
 
 The report must state:
 
@@ -531,8 +478,9 @@ K–P 管理字段按用户确认保持空白；模板示例已清除。
 ```
 
 Include source paths, focused commands, complete commands, and licensed-host commands. Do not claim VCS compile, simulation, functional coverage, or code coverage passed.
+Review this human-facing prose directly against the README and design; do not add exact-phrase tests for it.
 
-- [ ] **Step 4: Run the complete static verification set**
+- [ ] **Step 2: Run the complete static verification set**
 
 Run:
 
@@ -545,9 +493,9 @@ unzip -t "waive/08-cp0_代码与功能覆盖率排除列表.xlsx"
 git diff --check
 ```
 
-Expected: all commands exit 0; the suite has at least 45 tests after adding interaction-2.2 tests; aggregate preflight remains 7 environments, 85 features, and 534 scenarios.
+Expected: all commands exit 0; the suite has at least 43 tests after adding interaction-2.2 tests; aggregate preflight remains 7 environments, 85 features, and 534 scenarios.
 
-- [ ] **Step 5: Probe and record the licensed-tool boundary**
+- [ ] **Step 3: Probe and record the licensed-tool boundary**
 
 Run:
 
@@ -557,7 +505,7 @@ make -C verif/common compile
 
 Expected on this host: static preflight passes first, then make exits nonzero with `Synopsys VCS not found`. Record this as an expected environment boundary, not a passed build.
 
-- [ ] **Step 6: Verify scope and repository cleanliness**
+- [ ] **Step 4: Verify scope and repository cleanliness**
 
 Run:
 
@@ -569,10 +517,10 @@ git diff --check
 
 Expected: no production RTL diff and no untracked QA images, PDFs, `node_modules`, or artifact directories.
 
-- [ ] **Step 7: Commit the final report and closure test**
+- [ ] **Step 5: Commit the final report**
 
 ```bash
-git add docs/interaction-2.2-followup-review.md tests/test_interaction_2_2_ag_clarification.py
+git add docs/interaction-2.2-followup-review.md
 git commit -m "docs: close interaction 2.2 review"
 ```
 
@@ -604,7 +552,7 @@ If remote moved, inspect every new commit, reconcile without force, and rerun th
 
 - [ ] **Step 3: Run fresh verification on the final review commit**
 
-Repeat Task 4 Step 4 and inspect the final three workbook renders again. Verify `git diff --check` and a clean worktree.
+Repeat Task 4 Step 2 and inspect the final three workbook renders again. Verify `git diff --check` and a clean worktree.
 
 - [ ] **Step 4: Fast-forward local main**
 
@@ -618,7 +566,7 @@ Expected: `main` advances without a merge commit.
 
 - [ ] **Step 5: Run the complete verification set on merged main**
 
-Run Task 4 Step 4 from the primary checkout. Stop before pushing if any command fails.
+Run Task 4 Step 2 from the primary checkout. Stop before pushing if any command fails.
 
 - [ ] **Step 6: Push without force and verify exact remote equality**
 
