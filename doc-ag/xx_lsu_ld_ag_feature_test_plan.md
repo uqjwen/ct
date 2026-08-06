@@ -90,6 +90,12 @@ testcase task 的场景。机器可读源为
 
 ### AG-FP-05：stall/restart仲裁
 
+#### AG-FP-05-S07 的 DUT 边界
+
+AG-FP-05-S07 是 DUT 功能点。“由真实 MMU 输入驱动、未直接强制 DUT 输出”描述的是验证方法：testbench 驱动 `dcache_arb_lag_ex1_sel`、`idu_lsu_rf_older_vld`、`mmu_lsu_pa_vld`、`mmu_lsu_access_fault` 和 `lrq_lsu_ex1_lrqid` 等 DUT 输入；DUT 内部派生 `ld_ag_stall_mask`、`lag_mmu_acfault` 和已保存的 LRQ owner；testbench 只观察 `lsu_mmu_abort`、`lsu_lrq_create_frz` 和 `lag_ex1_stall_restart_entry` 等 DUT 输出。验证环境不直接驱动或 force DUT 输出，因此 PASS 必须来自 RTL 因果链，而不是测试平台伪造结果。
+
+该场景区分纯 TLB miss 与 aborted miss：纯 miss 保持 frozen；当独立 access-fault 使 `lsu_mmu_abort=1` 时，已创建 LRQ owner 必须得到 `lsu_lrq_create_frz=0` 和非零 restart bitmap。当前仅有静态 driver/assertion/cover 证据，动态状态仍为 `BLOCKED_NO_VCS`。
+
 |场景 | 前置、逐拍驱动 | 当 | 则 | 检查与关闭 |
 |---|---|---|---|---|
 |`AG-FP-05-S01` | fresh owner；C0置D-cache sel=0；C1/C2采样 | 当 `lag_ex1_inst_vld=1` 且 `dcache_arb_lag_ex1_sel=0` 时 | 则 C1 `lag_ex1_stall_ori=1` 且fresh owner只以当前IID产生一次 `lsu_lrq_create_vld` | stall owner稳定且create不重复 |

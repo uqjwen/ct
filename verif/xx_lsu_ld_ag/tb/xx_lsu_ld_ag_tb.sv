@@ -359,10 +359,9 @@ module xx_lsu_ld_ag_tb;
                 "replay D-cache rejection did not stall");
     drain();
 
-    // AG-FP-05-S07: an older RF request displaces a structurally stalled
-    // owner while PA is absent.  The delayed access-fault path aborts the MMU
-    // request without directly driving lsu_mmu_abort, so the created LRQ owner
-    // must be immediately replayable instead of frozen.
+    // AG-FP-05-S07 is a DUT functional scenario.  The testbench drives only
+    // upstream MMU/IDU/D-cache inputs; lsu_mmu_abort, create_frz, and the
+    // restart bitmap must be produced by the DUT and are observation-only.
     apply_reset();
     bus.dcache_arb_lag_ex1_sel = 1'b0;
     bus.lrq_lsu_ex1_lrqid = 12'b0000_0010_0000;
