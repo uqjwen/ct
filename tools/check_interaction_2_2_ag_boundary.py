@@ -145,7 +145,10 @@ def _is_assigned(task_body: str, signal: str) -> bool:
         if match.group(1) is not None:
             return True
         suffix = executable[match.end():]
-        if re.match(r"\s*(?:=(?!=)|<=|\+=|-=|\*=|/=|&=|\|=|\^=)", suffix):
+        if re.match(
+            r"\s*(?:\[[^\]\n]*\]\s*)*(?:=(?!=)|<=|\+=|-=|\*=|/=|&=|\|=|\^=)",
+            suffix,
+        ):
             return True
     return False
 

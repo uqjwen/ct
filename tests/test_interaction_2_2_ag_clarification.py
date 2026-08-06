@@ -30,6 +30,16 @@ class Interaction22AgClarificationTests(unittest.TestCase):
 
         self.assertTrue(_is_assigned(task, "lsu_lrq_create_frz"))
 
+    def test_assignment_check_rejects_conditional_dut_output_select_drive(self) -> None:
+        for select in ("[0]", "[3:0]", "[index +: 4]", "[index -: 4]"):
+            with self.subTest(select=select):
+                task = (
+                    "if (inject_fault) "
+                    f"bus.lag_ex1_stall_restart_entry{select} = 1'b1;"
+                )
+
+                self.assertTrue(_is_assigned(task, "lag_ex1_stall_restart_entry"))
+
     def test_assignment_check_ignores_dut_output_names_in_comments_and_strings(self) -> None:
         task = """
             // if (inject_fault) force bus.lag_ex1_stall_restart_entry = '1;
