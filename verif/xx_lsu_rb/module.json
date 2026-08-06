@@ -1,0 +1,47 @@
+{
+  "env_name": "xx_lsu_rb",
+  "dut_module": "xx_lsu_rb",
+  "dut_source": "srcs/xx_lsu_rb.sv",
+  "feature_doc": "doc-rb/xx_lsu_rb_feature_test_plan.md",
+  "runbook": "doc-rb/xx_lsu_rb_vcs_verification.md",
+  "feature_prefix": "RB",
+  "expected_features": 12,
+  "min_scenarios_per_feature": 6,
+  "clock": "forever_cpuclk",
+  "reset": "cpurst_b",
+  "parameters": {
+    "IID_WIDTH": 7,
+    "PREG": 7,
+    "VREG": 7,
+    "VMBENTRY": 8,
+    "RBENTRY": 32
+  },
+  "idle_overrides": {
+    "lsu_special_clk": null,
+    "cp0_lsu_icg_en": "1'b1",
+    "cp0_lsu_dcache_en": "1'b1"
+  },
+  "production_sources": [
+    "srcs/xx_lsu_rb_entry.sv"
+  ],
+  "declared_stubs": [
+    "gated_clk_cell",
+    "xx_lsu_compare_iid",
+    "xx_lsu_rb_data",
+    "xx_lsu_encode",
+    "xx_lsu_idfifo_32",
+    "xx_lsu_pend_addr_sel_32",
+    "xx_lsu_rot_data",
+    "xx_lsu_rot_us_data"
+  ],
+  "stub_results": {
+    "gated_clk_cell": "PENDING_FULL_CHIP",
+    "xx_lsu_compare_iid": "PENDING_FULL_CHIP",
+    "xx_lsu_rb_data": "PENDING_FULL_CHIP",
+    "xx_lsu_encode": "PENDING_FULL_CHIP",
+    "xx_lsu_idfifo_32": "PENDING_FULL_CHIP",
+    "xx_lsu_pend_addr_sel_32": "PENDING_FULL_CHIP",
+    "xx_lsu_rot_data": "PENDING_FULL_CHIP",
+    "xx_lsu_rot_us_data": "PENDING_FULL_CHIP"
+  }
+}

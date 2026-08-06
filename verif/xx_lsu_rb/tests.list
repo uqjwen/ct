@@ -1,0 +1,12 @@
+tc_rb_capacity
+tc_rb_create_arb
+tc_rb_entry_lifecycle
+tc_rb_merge
+tc_rb_biu_ar
+tc_rb_lfb_create
+tc_rb_r_response
+tc_rb_b_response
+tc_rb_so_fifo
+tc_rb_wb
+tc_rb_flush
+tc_rb_clock_reset

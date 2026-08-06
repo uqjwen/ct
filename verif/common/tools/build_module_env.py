@@ -102,6 +102,22 @@ WB_FEATURES = (
 )
 
 
+RB_FEATURES = (
+    Feature("容量、保留项与create资格", "tc_rb_capacity", "CHK_RB_FP01_CAPACITY", "COV_RB_FP01_CAPACITY", "P0", ("lda0_rb_ex3_create_vld", "lda0_rb_ex3_create_judge_vld", "lda0_ex3_iid"), ("rb_lda0_ex3_full", "lsu0_idu_exx_rb_not_full", "rb_empty"), "当 `lda0_rb_ex3_create_vld=1` 且存在可用entry时", "则 `rb_lda0_ex3_full=0` 且create只占用一个entry", "scoreboard为每次分配记录entry、IID和generation，保留项不被普通create占用"),
+    Feature("三路create仲裁与payload winner", "tc_rb_create_arb", "CHK_RB_FP02_CREATE_ARB", "COV_RB_FP02_CREATE", "P0", ("lda0_rb_ex3_create_vld", "lsda0_rb_ex3_create_vld", "lsda1_rb_ex3_create_vld"), ("rb_lda0_ex3_full", "rb_lsda0_ex3_full", "rb_lsda1_ex3_full"), "当LD0、LS0和LS1 create同拍竞争时", "则仲裁只接受可用entry数量允许的owner且每个payload保持原IID", "三路payload使用互异IID和地址，winner与entry映射唯一"),
+    Feature("entry状态机与响应终态", "tc_rb_entry_lifecycle", "CHK_RB_FP03_LIFECYCLE", "COV_RB_FP03_LIFECYCLE", "P0", ("lda0_rb_ex3_create_vld", "bus_arb_rb_ar_grnt", "biu_lsu_r_vld"), ("rb_biu_ar_req", "rb_lwb_ex3_data_req", "rb_empty"), "当create被接受后BIU grant和R response依次到达时", "则entry按create、request、response、WB顺序推进且每个终态一次", "entry复用前generation递增，迟到响应不得命中新owner"),
+    Feature("同line merge与boundary", "tc_rb_merge", "CHK_RB_FP04_MERGE", "COV_RB_FP04_MERGE", "P0", ("lda0_rb_ex3_merge_vld", "lda0_ex3_boundary_after_mask", "lda0_ex3_addr"), ("rb_lda0_ex3_hit_idx", "rb_lda0_ex3_merge_fail"), "当 `lda0_rb_ex3_merge_vld=1` 且地址命中已有cache line时", "则hit_idx有效；跨boundary或不兼容属性时merge_fail有效且不污染旧payload", "same-line、different-line、boundary-first和boundary-second全部交叉"),
+    Feature("BIU AR请求属性与ID", "tc_rb_biu_ar", "CHK_RB_FP05_BIU_AR", "COV_RB_FP05_BIU_AR", "P0", ("lda0_rb_ex3_create_vld", "bus_arb_rb_ar_grnt", "lfb_addr_full"), ("rb_biu_ar_req", "rb_biu_ar_id", "rb_biu_ar_addr", "rb_biu_ar_len"), "当可请求entry成为BIU owner且LFB非full时", "则 `rb_biu_ar_req=1`，AR地址、长度、属性和BIU ID都属于同一entry", "grant前请求稳定，grant后每个entry只发一次AR"),
+    Feature("LFB create与依赖ID", "tc_rb_lfb_create", "CHK_RB_FP06_LFB", "COV_RB_FP06_LFB", "P0", ("lda0_rb_ex3_create_vld", "lda0_rb_ex3_create_lfb", "lfb_rb_create_id"), ("rb_lfb_create_vld", "rb_lfb_create_req", "rb_lfb_addr_tto4"), "当RB owner要求linefill且LFB可接受时", "则LFB create valid、地址和BIU ID属于同一RB owner", "LFB full/hit/grant交叉不重复创建且依赖wakeup不串entry"),
+    Feature("R response两拍与错误归属", "tc_rb_r_response", "CHK_RB_FP07_R_RESPONSE", "COV_RB_FP07_R", "P0", ("biu_lsu_r_vld", "biu_lsu_r_id", "biu_lsu_r_resp", "biu_lsu_r_data"), ("rb_lwb_ex3_data_req", "rb_lwb_ex3_bus_err", "rb_lwb_ex3_data_iid"), "当匹配BIU ID的unit-stride R response到达时", "则恰好两拍数据按同一entry组装；错误响应只标记原owner并抑制正常完成", "0/1/N拍响应、错误beat和entry立即复用均以BIU ID及generation判定"),
+    Feature("B response与atomic owner", "tc_rb_b_response", "CHK_RB_FP08_B_RESPONSE", "COV_RB_FP08_B", "P0", ("biu_lsu_b_vld", "biu_lsu_b_id", "lda0_rb_ex3_atomic"), ("rb_lwb_ex3_cmplt_req", "rb_lwb_ex3_iid", "rb_lwb_ex3_expt_vld"), "当atomic或store相关entry收到匹配的B response时", "则completion、exception和IID只归属于原entry owner", "B response按BIU ID配对，迟到或重复B不得命中已复用entry"),
+    Feature("SO ID FIFO与pending", "tc_rb_so_fifo", "CHK_RB_FP09_SO_FIFO", "COV_RB_FP09_SO", "P1", ("lda0_rb_ex3_create_vld", "lda0_ex3_page_so", "biu_lsu_r_vld"), ("rb_wmb_so_pending", "rb_has_pend", "rb_pend_addr_f"), "当strong-order entry创建并等待响应时", "则SO FIFO按请求顺序维护ID且pending地址属于队首owner", "FIFO empty/full、连续push/pop和response同拍不丢ID"),
+    Feature("WB completion与data grant", "tc_rb_wb", "CHK_RB_FP10_WB", "COV_RB_FP10_WB", "P0", ("lwb_rb_ex3_cmplt_grnt", "lwb_rb_ex3_data_grnt", "biu_lsu_r_vld"), ("rb_lwb_ex3_cmplt_req", "rb_lwb_ex3_data_req", "rb_lwb_ex3_data"), "当响应完成的entry请求WB且grant到达时", "则completion/data请求保持到grant，winner数据和IID来自同一entry", "completion与data独立反压，任一grant不会清除另一未完成请求"),
+    Feature("同步与异步flush", "tc_rb_flush", "CHK_RB_FP11_FLUSH", "COV_RB_FP11_FLUSH", "P0", ("lda0_rb_ex3_create_vld", "rtu_yy_xx_flush", "rtu_lsu_async_flush"), ("rb_biu_ar_req", "rb_lwb_ex3_cmplt_req", "rb_lfb_create_vld"), "当live entry遇到sync flush或async flush时", "则可取消owner不再发出新的BIU、LFB或WB副作用；不可取消事务仍按协议收尾", "sync flush、async flush与check flush分别验证，迟到响应不得复活已清entry"),
+    Feature("entry门控时钟与reset", "tc_rb_clock_reset", "CHK_RB_FP12_CLOCK_RESET", "COV_RB_FP12_CLOCK", "P1", ("lda0_rb_ex3_create_vld", "cp0_lsu_icg_en", "pad_yy_icg_scan_en"), ("rb_empty", "rb_biu_ar_req", "rb_lwb_ex3_data_req"), "当ICG关闭、scan开启或reset施加在create边界时", "则scan允许状态捕获，reset后RB为空且所有请求为0", "所有entry gate、pointer gate和special clock边界无X或幽灵owner"),
+)
+
+
 CONFIGS = {
     "xx_lsu_ld_dc": Environment(
         name="xx_lsu_ld_dc",
@@ -150,6 +166,22 @@ CONFIGS = {
         features=WB_FEATURES,
         doc_tokens=("- 请求蕴含链：req=1 时必须 DP=1 且 gate=1；DP-only只允许预开数据路径。", "- 持续请求可在任意空闲lane获得服务，完成和数据不会丢失。"),
     ),
+    "xx_lsu_rb": Environment(
+        name="xx_lsu_rb",
+        prefix="RB",
+        source="srcs/xx_lsu_rb.sv",
+        feature_doc="doc-rb/xx_lsu_rb_feature_test_plan.md",
+        runbook="doc-rb/xx_lsu_rb_vcs_verification.md",
+        clock="forever_cpuclk",
+        reset="cpurst_b",
+        flush="rtu_yy_xx_flush",
+        parameters={"IID_WIDTH": 7, "PREG": 7, "VREG": 7, "VMBENTRY": 8, "RBENTRY": 32},
+        idle_overrides={"lsu_special_clk": None, "cp0_lsu_icg_en": "1'b1", "cp0_lsu_dcache_en": "1'b1"},
+        declared_stubs=("gated_clk_cell", "xx_lsu_compare_iid", "xx_lsu_rb_data", "xx_lsu_encode", "xx_lsu_idfifo_32", "xx_lsu_pend_addr_sel_32", "xx_lsu_rot_data", "xx_lsu_rot_us_data"),
+        production_sources=("srcs/xx_lsu_rb_entry.sv",),
+        features=RB_FEATURES,
+        doc_tokens=("- Scoreboard键为 `{entry, IID, generation, BIU ID, owner}`，entry复用必须递增generation。", "- unit-stride R response必须恰好两拍；B response必须按BIU ID与原owner配对。", "- sync flush、check flush与async flush分别验证，不把不可取消的总线事务误报为新副作用。"),
+    ),
 }
 
 
@@ -195,9 +227,10 @@ def _scenario_variants(config: Environment, index: int, feature: Feature) -> lis
         "DC": "ldc_lda_ex2_inst_vld",
         "DA": "lda_ex3_inst_vld",
         "WB": "lwb_ex4_inst_vld",
+        "RB": "rb_biu_ar_req",
     }.get(config.prefix, primary_observe)
     templates = (
-        ("名义accept", "复位释放、无flush且所有非目标输入idle", feature.drive, "C0: 驱动名义输入；C1: 采样目标输出", feature.trigger, feature.observe, feature.expected, feature.closure),
+        ("名义accept", "复位释放、无flush且所有非目标输入idle", feature.drive, "C0: 驱动名义输入；C1: 采样目标输出", f"{feature.trigger}；触发信号 `{primary_drive}`", feature.observe, f"{feature.expected}；交付信号 `{primary_observe}`", feature.closure),
         ("连续两拍保持", "先建立同一owner并施加两拍合法反压", feature.drive, "C0: 建立owner；C1: 首次采样；C2: 保持输入再次采样", f"当 `{primary_drive}=1` 且同一owner连续保持两拍时", feature.observe, f"则 C1至C2 `{primary_observe}` 保持二态且只归属于同一owner", "两拍保持期间payload hash和owner均不漂移"),
         ("竞争与优先级", "目标请求与次级来源同拍，二者payload使用互异花纹", feature.drive, "C0: 同拍驱动竞争来源；C1: 采样winner；C2: 检查loser未被消费", f"当 `{primary_drive}=1` 与同级竞争条件同拍成立时", feature.observe, f"则 C1 `{primary_observe}` 只反映文档定义的winner且不含X", "winner唯一，loser payload零次误消费"),
         ("full flush交叉", "先建立live owner，再在转移边界施加full flush", tuple(dict.fromkeys((*feature.drive, config.flush))), "C0: 建立owner；C1: full flush=1；C2: 撤销后采样", f"当 `{primary_drive}=1` 与 `{config.flush}=1` 在owner窗口交叉时", tuple(dict.fromkeys((*feature.observe, common_observe))), f"则 C2 `{common_observe}=0` 且 `{primary_observe}` 不得产生被flush owner的新副作用", "flush后的completion/create/forward计数均不增加"),
@@ -363,6 +396,58 @@ endmodule""")
   output logic [127:0] data_settle_out
 );
   always_comb data_settle_out = data_in;
+endmodule""")
+    if "xx_lsu_rot_us_data" in config.declared_stubs:
+        blocks.append("""module xx_lsu_rot_us_data (
+  input logic [127:0] data_in0, input logic [127:0] data_in1,
+  input logic [127:0] data_in2, input logic [127:0] data_in3,
+  input logic [5:0] rot_sel, output logic [127:0] data_out0,
+  output logic [127:0] data_out1, output logic [127:0] data_out2,
+  output logic [127:0] data_out3
+);
+  always_comb begin data_out0 = data_in0; data_out1 = data_in1; data_out2 = data_in2; data_out3 = data_in3; end
+endmodule""")
+    if "xx_lsu_encode" in config.declared_stubs:
+        blocks.append("""module xx_lsu_encode #(parameter int RBENTRY = 32) (
+  output logic [4:0] x_num, input logic [RBENTRY-1:0] x_num_expand
+);
+  integer i;
+  always_comb begin x_num = '0; for (i = 0; i < RBENTRY; i = i + 1) if (x_num_expand[i]) x_num = i[4:0]; end
+endmodule""")
+    if "xx_lsu_idfifo_32" in config.declared_stubs:
+        blocks.append("""module xx_lsu_idfifo_32 #(parameter int IDFIFO_ENTRY = 32) (
+  input logic cp0_lsu_icg_en, input logic cpurst_b, input logic forever_cpuclk,
+  input logic idfifo_clk_en, input logic [4:0] idfifo_create_id,
+  input logic [IDFIFO_ENTRY-1:0] idfifo_create_id_oh, input logic idfifo_create_vld,
+  output logic idfifo_empty, output logic [IDFIFO_ENTRY-1:0] idfifo_pop_id_oh,
+  input logic idfifo_pop_vld, input logic pad_yy_icg_scan_en
+);
+  always_comb begin idfifo_empty = !idfifo_create_vld; idfifo_pop_id_oh = idfifo_create_id_oh; end
+endmodule""")
+    if "xx_lsu_pend_addr_sel_32" in config.declared_stubs:
+        blocks.append("""module xx_lsu_pend_addr_sel_32 #(parameter int RBENTRY = 32) (
+  input logic cp0_lsu_icg_en, input logic cpurst_b, input logic forever_cpuclk,
+  input logic pad_yy_icg_scan_en, input logic [RBENTRY-1:0][`WK_PA_WIDTH-1:0] xxsource_entry_addr,
+  input logic [RBENTRY-1:0] xxsource_entry_page_ca, input logic [RBENTRY-1:0] xxsource_entry_page_so,
+  output logic xxsource_has_pend, output logic [`WK_PA_WIDTH-1:0] xxsource_pend_addr_f,
+  output logic xxsource_pend_busy, input logic [RBENTRY-1:0] xxsource_pend_entry,
+  output logic xxsource_pend_page_ca_f, output logic xxsource_pend_page_so_f
+);
+  always_comb begin xxsource_has_pend = |xxsource_pend_entry; xxsource_pend_busy = |xxsource_pend_entry; xxsource_pend_addr_f = '0; xxsource_pend_page_ca_f = 1'b0; xxsource_pend_page_so_f = 1'b0; end
+endmodule""")
+    if "xx_lsu_rb_data" in config.declared_stubs:
+        blocks.append("""module xx_lsu_rb_data (
+  input logic [127:0] entry_data, input logic [15:0] entry_bytes_vld,
+  input logic entry_inst_us, input logic entry_boundary, input logic entry_wait_data_ff,
+  input logic ld0_create_vld_ff, input logic ld0_merge_vld_ff, input logic ld0_boundary_ff,
+  input logic ls0_create_vld_ff, input logic ls0_merge_vld_ff, input logic ls0_boundary_ff,
+  input logic ls1_create_vld_ff, input logic ls1_merge_vld_ff, input logic ls1_boundary_ff,
+  input logic [127:0] ld0_data_ori, input logic [127:0] ls0_data_ori,
+  input logic [127:0] ls1_data_ori, input logic [127:0] biu_data_ori,
+  output logic [127:0] merge_data, output logic [127:0] data_aft_rev,
+  output logic [127:0] biu_data_updt
+);
+  always_comb begin merge_data = ld0_data_ori | ls0_data_ori | ls1_data_ori; data_aft_rev = entry_data; biu_data_updt = biu_data_ori; end
 endmodule""")
     if "xx_lsu_27bit_2stage_ecc_decode" in config.declared_stubs:
         blocks.append("""module xx_lsu_27bit_2stage_ecc_decode (

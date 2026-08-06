@@ -23,6 +23,14 @@ _DECLARATION = re.compile(
     r"(?:(\[[^;\n]+\])\s+)?"
     r"([^;]+);"
 )
+_ANSI_DECLARATION = re.compile(
+    r"^\s*(input|output|inout)\s+"
+    r"(?:(?:wire|reg|logic|signed|unsigned|var)\s+)*"
+    r"(?:(\[[^\]]+\])\s+)?"
+    r"([A-Za-z_][A-Za-z0-9_$]*)"
+    r"(?:\s*=\s*.+)?\s*$",
+    flags=re.DOTALL,
+)
 
 
 def strip_comments(text: str) -> str:
@@ -111,10 +119,38 @@ def _declared_ports(body: str) -> dict[str, tuple[str, str]]:
 
 
 def parse_module_ports(source: str, module_name: str) -> list[Port]:
-    """Return non-ANSI ports in the order used by the module header."""
+    """Return ANSI or non-ANSI ports in module-header order."""
 
     header, body = _module_region(source, module_name)
-    names = _split_top_level(header)
+    header_items = _split_top_level(header)
+    ansi = any(
+        re.match(r"^\s*(?:input|output|inout)\b", item) is not None
+        for item in header_items
+    )
+    if ansi:
+        ports: list[Port] = []
+        malformed: list[str] = []
+        for item in header_items:
+            match = _ANSI_DECLARATION.fullmatch(item)
+            if match is None:
+                malformed.append(item)
+                continue
+            direction, width, name = match.groups()
+            ports.append(Port(name=name, direction=direction, width=(width or "").strip()))
+        if malformed:
+            raise ValueError(f"malformed ANSI header ports: {', '.join(malformed)}")
+        names = [port.name for port in ports]
+        seen: set[str] = set()
+        duplicates: list[str] = []
+        for name in names:
+            if name in seen and name not in duplicates:
+                duplicates.append(name)
+            seen.add(name)
+        if duplicates:
+            raise ValueError(f"duplicate header port: {', '.join(duplicates)}")
+        return ports
+
+    names = header_items
     malformed = [name for name in names if _IDENTIFIER.fullmatch(name) is None]
     if malformed:
         raise ValueError(f"malformed header ports: {', '.join(malformed)}")

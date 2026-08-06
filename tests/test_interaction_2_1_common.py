@@ -42,6 +42,20 @@ class RtlPortTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "missing declarations"):
             parse_module_ports(missing, "demo")
 
+    def test_parses_real_ansi_rb_ports_in_header_order(self) -> None:
+        source = (ROOT / "srcs/xx_lsu_rb.sv").read_text(encoding="utf-8")
+
+        ports = parse_module_ports(source, "xx_lsu_rb")
+
+        self.assertGreater(len(ports), 300)
+        self.assertEqual("biu_lsu_b_id", ports[0].name)
+        self.assertTrue(
+            any(
+                port.name == "rb_biu_ar_req" and port.direction == "output"
+                for port in ports
+            )
+        )
+
 
 class ScenarioContractTests(unittest.TestCase):
     def test_rejects_unknown_signal_and_non_leaf_language(self) -> None:
