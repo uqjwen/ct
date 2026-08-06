@@ -136,6 +136,26 @@ def _parenthesis_depth(text: str, position: int) -> int:
     return depth
 
 
+def _after_selectors(text: str, position: int) -> int:
+    while True:
+        while position < len(text) and text[position].isspace():
+            position += 1
+        if position == len(text) or text[position] != "[":
+            return position
+        depth = 0
+        while position < len(text):
+            if text[position] == "[":
+                depth += 1
+            elif text[position] == "]":
+                depth -= 1
+                if depth == 0:
+                    position += 1
+                    break
+            position += 1
+        if depth != 0:
+            return len(text)
+
+
 def _is_assigned(task_body: str, signal: str) -> bool:
     executable = _executable_text(task_body)
     pattern = re.compile(rf"\b(?:(force)\s+)?(?:bus\.|dut\.){re.escape(signal)}\b")
@@ -144,9 +164,9 @@ def _is_assigned(task_body: str, signal: str) -> bool:
             continue
         if match.group(1) is not None:
             return True
-        suffix = executable[match.end():]
+        suffix = executable[_after_selectors(executable, match.end()):]
         if re.match(
-            r"\s*(?:\[[^\]\n]*\]\s*)*(?:=(?!=)|<=|\+=|-=|\*=|/=|&=|\|=|\^=)",
+            r"(?:=(?!=)|<=|\+=|-=|\*=|/=|&=|\|=|\^=)",
             suffix,
         ):
             return True

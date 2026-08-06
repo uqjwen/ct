@@ -31,7 +31,13 @@ class Interaction22AgClarificationTests(unittest.TestCase):
         self.assertTrue(_is_assigned(task, "lsu_lrq_create_frz"))
 
     def test_assignment_check_rejects_conditional_dut_output_select_drive(self) -> None:
-        for select in ("[0]", "[3:0]", "[index +: 4]", "[index -: 4]"):
+        for select in (
+            "[0]",
+            "[3:0]",
+            "[index +: 4]",
+            "[index -: 4]",
+            "[index_array[lane]]",
+        ):
             with self.subTest(select=select):
                 task = (
                     "if (inject_fault) "
