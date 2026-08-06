@@ -1,0 +1,13 @@
+tc_lfb_allocate
+tc_lfb_addr_lifecycle
+tc_lfb_address_hit
+tc_lfb_data_binding
+tc_lfb_biu_response
+tc_lfb_vb
+tc_lfb_refill
+tc_lfb_all_response
+tc_lfb_dependency
+tc_lfb_snq_bypass
+tc_lfb_flush
+tc_lfb_capacity
+tc_lfb_clock_reset

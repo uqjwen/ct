@@ -1,0 +1,52 @@
+{
+  "env_name": "xx_lsu_lfb",
+  "dut_module": "xx_lsu_lfb",
+  "dut_source": "srcs/xx_lsu_lfb.sv",
+  "feature_doc": "doc-lfb/xx_lsu_lfb_feature_test_plan.md",
+  "runbook": "doc-lfb/xx_lsu_lfb_vcs_verification.md",
+  "feature_prefix": "LFB",
+  "expected_features": 13,
+  "min_scenarios_per_feature": 6,
+  "clock": "forever_cpuclk",
+  "reset": "cpurst_b",
+  "parameters": {
+    "LSIQ_ENTRY": 12,
+    "LFB_ADDR_ENTRY": 16,
+    "LFB_DATA_ENTRY": 2,
+    "BIU_LFB_ID_T": 0,
+    "OKAY": 0,
+    "EXOKAY": 1,
+    "SLVERR": 2,
+    "DECERR": 3
+  },
+  "idle_overrides": {
+    "lsu_special_clk": null,
+    "cp0_lsu_icg_en": "1'b1",
+    "cp0_lsu_dcache_en": "1'b1"
+  },
+  "production_sources": [
+    "srcs/xx_lsu_lfb_addr_entry.sv"
+  ],
+  "declared_stubs": [
+    "gated_clk_cell",
+    "xx_lsu_lfb_data_entry",
+    "xx_lsu_expand",
+    "xx_lsu_32bit_ecc_encode",
+    "xx_lsu_27bit_ecc_encode",
+    "xx_lsu_35bit_ecc_encode",
+    "xx_lsu_30bit_ecc_encode",
+    "xx_lsu_38bit_ecc_encode",
+    "xx_lsu_pend_addr_sel_sv"
+  ],
+  "stub_results": {
+    "gated_clk_cell": "PENDING_FULL_CHIP",
+    "xx_lsu_lfb_data_entry": "PENDING_FULL_CHIP",
+    "xx_lsu_expand": "PENDING_FULL_CHIP",
+    "xx_lsu_32bit_ecc_encode": "PENDING_FULL_CHIP",
+    "xx_lsu_27bit_ecc_encode": "PENDING_FULL_CHIP",
+    "xx_lsu_35bit_ecc_encode": "PENDING_FULL_CHIP",
+    "xx_lsu_30bit_ecc_encode": "PENDING_FULL_CHIP",
+    "xx_lsu_38bit_ecc_encode": "PENDING_FULL_CHIP",
+    "xx_lsu_pend_addr_sel_sv": "PENDING_FULL_CHIP"
+  }
+}

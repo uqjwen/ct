@@ -14,6 +14,7 @@ class Port:
     name: str
     direction: str
     width: str = ""
+    unpacked: str = ""
 
 
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
@@ -28,6 +29,7 @@ _ANSI_DECLARATION = re.compile(
     r"(?:(?:wire|reg|logic|signed|unsigned|var)\s+)*"
     r"(?:(\[[^\]]+\])\s+)?"
     r"([A-Za-z_][A-Za-z0-9_$]*)"
+    r"((?:\s*\[[^\]]+\])*)"
     r"(?:\s*=\s*.+)?\s*$",
     flags=re.DOTALL,
 )
@@ -105,16 +107,22 @@ def _module_region(source: str, module_name: str) -> tuple[str, str]:
     return clean[cursor + 1 : port_close], clean[semicolon + 1 : body_end]
 
 
-def _declared_ports(body: str) -> dict[str, tuple[str, str]]:
-    declarations: dict[str, tuple[str, str]] = {}
+def _declared_ports(body: str) -> dict[str, tuple[str, str, str]]:
+    declarations: dict[str, tuple[str, str, str]] = {}
     for match in _DECLARATION.finditer(body):
         direction, width, names_blob = match.groups()
         for item in _split_top_level(names_blob):
-            name_match = re.match(r"\s*([A-Za-z_][A-Za-z0-9_$]*)", item)
+            name_match = re.match(
+                r"\s*([A-Za-z_][A-Za-z0-9_$]*)((?:\s*\[[^\]]+\])*)",
+                item,
+            )
             if name_match is None:
                 continue
-            name = name_match.group(1)
-            declarations.setdefault(name, (direction, (width or "").strip()))
+            name, unpacked = name_match.groups()
+            declarations.setdefault(
+                name,
+                (direction, (width or "").strip(), unpacked.strip()),
+            )
     return declarations
 
 
@@ -135,8 +143,15 @@ def parse_module_ports(source: str, module_name: str) -> list[Port]:
             if match is None:
                 malformed.append(item)
                 continue
-            direction, width, name = match.groups()
-            ports.append(Port(name=name, direction=direction, width=(width or "").strip()))
+            direction, width, name, unpacked = match.groups()
+            ports.append(
+                Port(
+                    name=name,
+                    direction=direction,
+                    width=(width or "").strip(),
+                    unpacked=unpacked.strip(),
+                )
+            )
         if malformed:
             raise ValueError(f"malformed ANSI header ports: {', '.join(malformed)}")
         names = [port.name for port in ports]
@@ -170,6 +185,11 @@ def parse_module_ports(source: str, module_name: str) -> list[Port]:
         raise ValueError(f"missing declarations for ports: {', '.join(missing)}")
 
     return [
-        Port(name=name, direction=declarations[name][0], width=declarations[name][1])
+        Port(
+            name=name,
+            direction=declarations[name][0],
+            width=declarations[name][1],
+            unpacked=declarations[name][2],
+        )
         for name in names
     ]

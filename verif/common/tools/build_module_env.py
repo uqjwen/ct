@@ -134,6 +134,23 @@ LRQ_FEATURES = (
 )
 
 
+LFB_FEATURES = (
+    Feature("RB/PFU地址项分配", "tc_lfb_allocate", "CHK_LFB_FP01_ALLOCATE", "COV_LFB_FP01_ALLOCATE", "P0", ("rb_lfb_create_vld", "pfu_lfb_create_vld", "rb_biu_req_addr"), ("lfb_rb_create_id", "lfb_pfu_create_id", "lfb_addr_full"), "当 `rb_lfb_create_vld=1` 或PFU create请求到达且有空闲地址项时", "则winner获得唯一create ID，返回ID与来源地址属于同一owner", "empty、one-left、full及RB/PFU同拍竞争使用互异地址"),
+    Feature("地址entry生命周期与复用", "tc_lfb_addr_lifecycle", "CHK_LFB_FP02_ADDR_LIFECYCLE", "COV_LFB_FP02_ADDR", "P0", ("rb_lfb_create_vld", "biu_lsu_r_vld", "biu_lsu_r_last"), ("lsu_had_lfb_addr_entry_vld", "lfb_empty"), "当地址entry依次经历create、response和pop时", "则valid按生命周期置位和释放，立即复用时旧事件不清除新owner", "scoreboard记录{addr entry,generation,source ID,data ID}"),
+    Feature("line地址命中与merge", "tc_lfb_address_hit", "CHK_LFB_FP03_ADDRESS_HIT", "COV_LFB_FP03_HIT", "P0", ("rb_lfb_create_req", "pfu_lfb_create_req", "wmb_read_req_addr"), ("lfb_rb_biu_req_hit_idx", "lfb_pfu_biu_req_hit_idx", "lfb_wmb_read_req_hit_idx"), "当请求地址与live LFB cache line相同或不同时", "则对应source hit满足onehot0且不同line不误命中", "same/different line、边界、多entry匹配负向场景均覆盖"),
+    Feature("地址/数据项ID绑定", "tc_lfb_data_binding", "CHK_LFB_FP04_DATA_BINDING", "COV_LFB_FP04_DATA", "P0", ("biu_lsu_r_vld", "biu_lsu_r_id", "biu_lsu_r_data"), ("lsu_had_lfb_data_entry_vld", "lfb_snq_bypass_data_id"), "当BIU response按ID命中地址项且存在空闲数据项时", "则addr ID、data ID与两数据项互异payload保持同一owner绑定", "data entry empty、one-left、full和交叉两地址响应均不串项"),
+    Feature("BIU R beat/last/error协议", "tc_lfb_biu_response", "CHK_LFB_FP05_BIU_RESPONSE", "COV_LFB_FP05_BIU", "P0", ("biu_lsu_r_vld", "biu_lsu_r_id", "biu_lsu_r_last", "biu_lsu_r_resp"), ("lsu_biu_r_linefill_ready", "lsu_had_lfb_data_entry_last", "lfb_rb_ca_rready_grnt"), "当匹配ID的BIU R beat到达时", "则ready/beat/last严格对应原owner；错ID、early/late last或error不得静默完成", "正常序列、错误响应和随机背压以beat计数器逐拍检查"),
+    Feature("VB replacement结果", "tc_lfb_vb", "CHK_LFB_FP06_VB", "COV_LFB_FP06_VB", "P0", ("vb_lfb_create_grnt", "vb_lfb_dcache_hit", "vb_lfb_dcache_dirty", "vb_lfb_dcache_way"), ("lfb_vb_create_vld", "lfb_vb_id", "lfb_vb_addr_tto6"), "当地址项申请VB并在0/1/N拍后获得grant时", "则refill way、hit/dirty和VB ID只归属于原地址entry", "hit clean、hit dirty、miss和多entry竞争全部覆盖"),
+    Feature("D-cache refill与ECC", "tc_lfb_refill", "CHK_LFB_FP07_REFILL", "COV_LFB_FP07_REFILL", "P0", ("dcache_arb_lfb_ld_grnt", "biu_lsu_r_data", "cp0_lsu_dcache_en"), ("lfb_dcache_arb_ld_data_req", "lfb_dcache_arb_ld_data_1st_din", "lfb_dcache_arb_ld_tag_wen"), "当完整linefill数据进入refill状态机且D-cache grant有效时", "则四way、全部data word、tag、dirty和ECC来自同一line reference model", "两data entry与四个refill block使用互异花纹并逐bit对比"),
+    Feature("all-response与NC empty", "tc_lfb_all_response", "CHK_LFB_FP08_ALL_RESPONSE", "COV_LFB_FP08_ALL", "P1", ("biu_lsu_r_vld", "biu_lsu_r_last", "rb_lfb_page_ca"), ("lfb_rb_nc_empty", "lfb_empty", "lfb_has_pend"), "当CA/NC live地址项以乱序或error response完成时", "则NC empty和all-response状态只在全部适用owner完成后成立", "混合CA/NC、乱序last、error和长期outstanding逐拍计数"),
+    Feature("依赖队列wakeup", "tc_lfb_dependency", "CHK_LFB_FP09_DEPENDENCY", "COV_LFB_FP09_WAKEUP", "P0", ("rb_lfb_depd", "rb_lfb_create_vld", "lm_already_snoop"), ("lfb_mcic_wakeup", "lfb_pop_depd_ff"), "当load miss依赖并入live地址entry且refill、pop或flush发生时", "则每个有效generation只产生一次wakeup；旧owner bit不得命中复用entry", "多依赖merge、部分/full flush和bit立即复用均覆盖"),
+    Feature("SNQ bypass owner", "tc_lfb_snq_bypass", "CHK_LFB_FP10_SNQ_BYPASS", "COV_LFB_FP10_SNQ", "P1", ("snq_lfb_vb_req_hit_idx", "snq_bypass_addr_tto6", "snq_lfb_bypass_invalid"), ("lfb_snq_bypass_hit", "lfb_snq_bypass_data_id", "lfb_snq_bypass_share"), "当SNQ地址命中已响应的live line时", "则bypass data ID、share和有效期属于同一地址/data owner", "两data项互异花纹、same/different line和多hit负向场景均覆盖"),
+    Feature("flush与outstanding回收", "tc_lfb_flush", "CHK_LFB_FP11_FLUSH", "COV_LFB_FP11_FLUSH", "P0", ("rb_lfb_create_vld", "rtu_yy_xx_flush", "rtu_ck_flush", "biu_lsu_r_vld"), ("lfb_dcache_arb_ld_req", "lfb_vb_create_vld", "lfb_mcic_wakeup"), "当create、VB、R beat、refill或pop阶段遇到full/check flush时", "则依赖队列被清，已发总线事务安全回收且不wakeup被杀owner", "响应继续与停止两种模型均检查零迟到功能副作用"),
+    Feature("容量计数与反压", "tc_lfb_capacity", "CHK_LFB_FP12_CAPACITY", "COV_LFB_FP12_CAPACITY", "P0", ("rb_lfb_create_vld", "pfu_lfb_create_vld", "biu_lsu_r_last"), ("lfb_addr_full", "lfb_addr_less2", "lfb_empty"), "当地址项和数据项从empty填充至full再drain时", "则full、less2、empty和create反压与reference counter逐拍一致", "create/pop同拍、one-left和长期背压不得计数漂移"),
+    Feature("entry/state clock reset", "tc_lfb_clock_reset", "CHK_LFB_FP13_CLOCK_RESET", "COV_LFB_FP13_CLOCK", "P1", ("rb_lfb_create_vld", "cp0_lsu_icg_en", "pad_yy_icg_scan_en"), ("lfb_empty", "lfb_dcache_arb_ld_req", "lfb_vb_create_vld"), "当ICG关闭、scan开启或reset命中状态更新边界时", "则功能事件打开适用gate，reset后empty=1且所有外部请求为0", "地址entry、数据entry、linefill状态机和wakeup queue无X或幽灵owner"),
+)
+
+
 CONFIGS = {
     "xx_lsu_ld_dc": Environment(
         name="xx_lsu_ld_dc",
@@ -214,6 +231,22 @@ CONFIGS = {
         features=LRQ_FEATURES,
         doc_tokens=("- create_vld=1只表示raw请求；与flush交叉时必须记录create_success=0。", "- Scoreboard按 `{bank, entry, IID, generation}` 跟踪旧 owner、entry复用和所有wakeup来源。"),
     ),
+    "xx_lsu_lfb": Environment(
+        name="xx_lsu_lfb",
+        prefix="LFB",
+        source="srcs/xx_lsu_lfb.sv",
+        feature_doc="doc-lfb/xx_lsu_lfb_feature_test_plan.md",
+        runbook="doc-lfb/xx_lsu_lfb_vcs_verification.md",
+        clock="forever_cpuclk",
+        reset="cpurst_b",
+        flush="rtu_yy_xx_flush",
+        parameters={"LSIQ_ENTRY": 12, "LFB_ADDR_ENTRY": 16, "LFB_DATA_ENTRY": 2, "BIU_LFB_ID_T": 0, "OKAY": 0, "EXOKAY": 1, "SLVERR": 2, "DECERR": 3},
+        idle_overrides={"lsu_special_clk": None, "cp0_lsu_icg_en": "1'b1", "cp0_lsu_dcache_en": "1'b1"},
+        declared_stubs=("gated_clk_cell", "xx_lsu_lfb_data_entry", "xx_lsu_expand", "xx_lsu_32bit_ecc_encode", "xx_lsu_27bit_ecc_encode", "xx_lsu_35bit_ecc_encode", "xx_lsu_30bit_ecc_encode", "xx_lsu_38bit_ecc_encode", "xx_lsu_pend_addr_sel_sv"),
+        production_sources=("srcs/xx_lsu_lfb_addr_entry.sv",),
+        features=LFB_FEATURES,
+        doc_tokens=("- Scoreboard同时跟踪 `{addr entry, data entry, source ID, generation}`，两data entry及所有refill block使用互异花纹。", "- 仓库缺少生产 `srcs/xx_lsu_lfb_data_entry.sv`；standalone兼容模型仅为 `PENDING_FULL_CHIP`，不得作为动态签核证据。"),
+    ),
 }
 
 
@@ -261,6 +294,7 @@ def _scenario_variants(config: Environment, index: int, feature: Feature) -> lis
         "WB": "lwb_ex4_inst_vld",
         "RB": "rb_biu_ar_req",
         "LRQ": "lrq_lsu0_rf_replay_vld",
+        "LFB": "lfb_dcache_arb_ld_req",
     }.get(config.prefix, primary_observe)
     templates = (
         ("名义accept", "复位释放、无flush且所有非目标输入idle", feature.drive, "C0: 驱动名义输入；C1: 采样目标输出", f"{feature.trigger}；触发信号 `{primary_drive}`", feature.observe, f"{feature.expected}；交付信号 `{primary_observe}`", feature.closure),
@@ -482,6 +516,72 @@ endmodule""")
 );
   always_comb begin merge_data = ld0_data_ori | ls0_data_ori | ls1_data_ori; data_aft_rev = entry_data; biu_data_updt = biu_data_ori; end
 endmodule""")
+    if "xx_lsu_lfb_data_entry" in config.declared_stubs:
+        blocks.append("""module xx_lsu_lfb_data_entry (
+  input logic [255:0] biu_lsu_r_data, input logic [1:0] biu_lsu_r_user,
+  input logic biu_lsu_r_last, input logic biu_lsu_r_vld,
+  input logic cp0_lsu_dcache_en, input logic cp0_lsu_icg_en, input logic cpurst_b,
+  input logic [15:0] lfb_addr_entry_linefill_abort,
+  input logic [15:0] lfb_addr_entry_linefill_permit,
+  input logic [3:0] lfb_biu_id_2to0, input logic lfb_biu_r_id_hit,
+  output logic [15:0] lfb_data_entry_addr_id_v,
+  output logic [15:0] lfb_data_entry_addr_pop_req_v,
+  input logic lfb_data_entry_create_dp_vld_x,
+  input logic lfb_data_entry_create_gateclk_en_x,
+  input logic lfb_data_entry_create_vld_x,
+  output logic [511:0] lfb_data_entry_data_v,
+  output logic lfb_data_entry_dcache_share_x,
+  output logic lfb_data_entry_full_x, output logic [1:0] lfb_data_entry_rsrc_x,
+  output logic lfb_data_entry_last_x, output logic lfb_data_entry_lf_sm_req_x,
+  output logic lfb_data_entry_vld_x, output logic lfb_data_entry_wait_surplus_x,
+  input logic [1:0] lfb_first_pass_ptr, input logic lfb_lf_sm_data_grnt_x,
+  input logic lfb_lf_sm_data_pop_req_x, input logic lfb_r_resp_err,
+  input logic lfb_r_resp_share, input logic lsu_special_clk,
+  input logic pad_yy_icg_scan_en, input logic snq_lfb_bypass_chg_tag_x,
+  input logic snq_lfb_bypass_invalid_x
+);
+  always_comb begin
+    lfb_data_entry_addr_id_v = '0; lfb_data_entry_addr_pop_req_v = '0;
+    lfb_data_entry_data_v = {biu_lsu_r_data, biu_lsu_r_data};
+    lfb_data_entry_dcache_share_x = lfb_r_resp_share;
+    lfb_data_entry_full_x = lfb_data_entry_create_vld_x;
+    lfb_data_entry_rsrc_x = biu_lsu_r_user; lfb_data_entry_last_x = biu_lsu_r_last;
+    lfb_data_entry_lf_sm_req_x = biu_lsu_r_last & biu_lsu_r_vld;
+    lfb_data_entry_vld_x = lfb_data_entry_create_vld_x;
+    lfb_data_entry_wait_surplus_x = 1'b0;
+  end
+endmodule""")
+    if "xx_lsu_expand" in config.declared_stubs:
+        blocks.append("""module xx_lsu_expand #(parameter int RBENTRY = 4) (
+  input logic [$clog2(RBENTRY)-1:0] x_num, output logic [RBENTRY-1:0] x_num_expand
+);
+  always_comb begin x_num_expand = '0; x_num_expand[x_num] = 1'b1; end
+endmodule""")
+    for ecc_name, data_width in (
+        ("xx_lsu_32bit_ecc_encode", 32),
+        ("xx_lsu_27bit_ecc_encode", 27),
+        ("xx_lsu_35bit_ecc_encode", 35),
+        ("xx_lsu_30bit_ecc_encode", 30),
+        ("xx_lsu_38bit_ecc_encode", 38),
+    ):
+        if ecc_name in config.declared_stubs:
+            blocks.append(f"""module {ecc_name} (
+  input logic [{data_width - 1}:0] data_encode,
+  output logic [5:0] ecc_code, output logic parity_bit
+);
+  always_comb begin ecc_code = '0; parity_bit = ^data_encode; end
+endmodule""")
+    if "xx_lsu_pend_addr_sel_sv" in config.declared_stubs:
+        blocks.append("""module xx_lsu_pend_addr_sel_sv #(parameter int RBENTRY = 16) (
+  input logic cp0_lsu_icg_en, input logic cpurst_b, input logic forever_cpuclk,
+  input logic pad_yy_icg_scan_en, input logic [RBENTRY-1:0][`WK_PA_WIDTH-1:0] xxsource_entry_addr,
+  input logic [RBENTRY-1:0] xxsource_entry_page_ca, input logic [RBENTRY-1:0] xxsource_entry_page_so,
+  output logic xxsource_has_pend, output logic [`WK_PA_WIDTH-1:0] xxsource_pend_addr_f,
+  output logic xxsource_pend_busy, input logic [RBENTRY-1:0] xxsource_pend_entry,
+  output logic xxsource_pend_page_ca_f, output logic xxsource_pend_page_so_f
+);
+  always_comb begin xxsource_has_pend = |xxsource_pend_entry; xxsource_pend_busy = |xxsource_pend_entry; xxsource_pend_addr_f = '0; xxsource_pend_page_ca_f = 1'b0; xxsource_pend_page_so_f = 1'b0; end
+endmodule""")
     if "xx_lsu_27bit_2stage_ecc_decode" in config.declared_stubs:
         blocks.append("""module xx_lsu_27bit_2stage_ecc_decode (
   input logic cpurst_b, input logic [26:0] data_decode,
@@ -512,7 +612,8 @@ endmodule""")
 
 def _filelist(config: Environment) -> str:
     defines = (
-        "TDT_MP_HINFO_WIDTH=17", "VL_WIDTH=8", "VSTART_WIDTH=7", "WK_PA_WIDTH=40", "WK_PA_WIDTH_40", "WK_VA_WIDTH=48", "WK_MA_WIDTH=40",
+        "TDT_MP_HINFO_WIDTH=17", "VL_WIDTH=8", "VSTART_WIDTH=7", "WK_PA_WIDTH=40", "WK_PA_WIDTH_40", "WK_VA_WIDTH=48", "WK_MA_WIDTH=40", "NUM_LD=1", "NUM_LS=2", "WK_LSL2_DID=4:0", "WK_LS_DID_RST=4",
+        "WK_LS_DCACHE_WAYS_NUM=4", "WK_LS_DCACHE_WAYIDX_WIDTH=2", "WK_LS_DCACHE_DATA_BITS_NUM=512", "WK_LS_DCACHE_DATA_WORDS_NUM=8", "WK_LS_DCACHE_DATA_IDX_MSB=10", "WK_LS_DATASRAM_ECC_WIDTH=6", "WK_LS_DCACHE_LDTAG_IDX_MSB=8", "WK_LS_DCACHE_LDTAG_AF_ECC_LENGTH=29", "WK_LS_DCACHE_STTAG_BF_ECC_LENGTH=30", "WK_LS_DCACHE_STTAG_AF_ECC_LENGTH=37", "WK_LS_DCACHE_META_IDX_MSB=8", "WK_LS_DCACHE_META_NOECC_WIDTH=4", "WK_LS_DCACHE_META_WIDTH=148", "WK_LS_DCACHE_TAG_NOECC_WIDTH=104",
         "WK_LS_DCACHE_SINGLE_TAG_WIDTH=26", "WK_LS_DCACHE_SINGLE_LDTAG_WIDTH=27", "WK_LS_DCACHE_DOUBLE_LDTAG_WIDTH=54", "WK_LS_DCACHE_TRIPLE_LDTAG_WIDTH=81", "WK_LS_DCACHE_LDTAG_WIDTH=108",
         "WK_LS_DCACHE_LDTAG_BF_ECC_LENGTH=22", "WK_LS_DCACHE_LDTAG_DOUBLE_BF_ECC_LENGTH=44", "WK_LS_DCACHE_LDTAG_TRIPLE_BF_ECC_LENGTH=66", "WK_LS_DCACHE_LDTAG_QUADRUPLE_BF_ECC_LENGTH=88",
     )
@@ -521,6 +622,9 @@ def _filelist(config: Environment) -> str:
 
 
 def _runbook(config: Environment) -> str:
+    missing_source = ""
+    if config.prefix == "LFB":
+        missing_source = "\n特别边界：仓库未提供 `srcs/xx_lsu_lfb_data_entry.sv`，本环境中的同名兼容模型保持 `PENDING_FULL_CHIP`。\n"
     return f"""# `{config.name}` interaction 2.1 VCS验证入口
 
 本环境包含{len(config.features)}个父功能点和{len(config.features) * 6}个逐拍叶级场景。
@@ -540,6 +644,7 @@ make coverage
 `make compile` 需要有许可证的VCS主机，`make coverage` 需要URG。standalone中
 {', '.join(config.declared_stubs)} 为显式兼容模型，必须在full-chip用生产定义替换，
 对应边界为 `PENDING_FULL_CHIP`。计划行是动态实现合同，不代表已获得仿真或覆盖率PASS。
+{missing_source}
 """
 
 

@@ -56,6 +56,21 @@ class RtlPortTests(unittest.TestCase):
             )
         )
 
+    def test_parses_real_ansi_lfb_unpacked_array_ports(self) -> None:
+        source = (ROOT / "srcs/xx_lsu_lfb.sv").read_text(encoding="utf-8")
+
+        ports = parse_module_ports(source, "xx_lsu_lfb")
+
+        self.assertGreater(len(ports), 100)
+        array_port = next(port for port in ports if port.name == "ld_da_addr_tto6")
+        self.assertEqual("[0: `NUM_LD + `NUM_LS-1]", array_port.unpacked)
+        self.assertTrue(
+            any(
+                port.name == "lfb_addr_full" and port.direction == "output"
+                for port in ports
+            )
+        )
+
 
 class ScenarioContractTests(unittest.TestCase):
     def test_rejects_unknown_signal_and_non_leaf_language(self) -> None:

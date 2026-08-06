@@ -56,7 +56,8 @@ def render_interface(manifest: ModuleManifest, ports: Iterable[Port]) -> str:
     idle = []
     for port in ports:
         width = f" {port.width}" if port.width else ""
-        signals.append(f"  logic{width} {port.name};")
+        unpacked = f" {port.unpacked}" if port.unpacked else ""
+        signals.append(f"  logic{width} {port.name}{unpacked};")
         if port.direction != "input" or port.name == manifest.clock:
             continue
         if port.name in manifest.idle_overrides:
@@ -64,7 +65,7 @@ def render_interface(manifest: ModuleManifest, ports: Iterable[Port]) -> str:
             if value is None:
                 continue
         else:
-            value = "'0"
+            value = "'{default:'0}" if port.unpacked else "'0"
         idle.append(f"    {port.name} = {value};")
     if not idle:
         idle.append("    // No input ports require an idle assignment.")
