@@ -4,7 +4,7 @@
 
 **Goal:** Clarify that AG-FP-05-S07 is a DUT functional scenario verified through real input stimulus, and populate the CP0 waiver workbook with 45 source-traceable code-coverage exclusions and no fabricated approval data.
 
-**Architecture:** Keep production RTL unchanged. Close the AG question through direction-aware documentation, testbench-comment clarification, and static regression tests; close the CP0 question through a reviewed CSV manifest, an artifact-tool workbook builder, an independent OOXML checker, visual QA, and an evidence report.
+**Architecture:** Keep production RTL unchanged. Close the AG question through direction-aware documentation, testbench-comment clarification, and static regression tests; close the CP0 question through a reviewed CSV manifest, an artifact-tool workbook builder, a narrowly authorized standard-library pane finalizer, an independent OOXML checker, visual QA, and an evidence report.
 
 **Tech Stack:** SystemVerilog source/testbench, Markdown, Python 3 `unittest` plus standard-library OOXML parsing, CSV, Node.js, `@oai/artifact-tool`, Git.
 
@@ -14,7 +14,7 @@
 - Do not modify any file under `srcs/`.
 - Do not directly drive or force `lsu_mmu_abort`, `lsu_lrq_create_frz`, or `lag_ex1_stall_restart_entry` in the AG testbench.
 - Keep AG dynamic results as `BLOCKED_NO_VCS` until real VCS logs and VDB evidence exist.
-- Use `@oai/artifact-tool` from the bundled workspace runtime for XLSX authoring; do not use `openpyxl`, `xlsxwriter`, or pandas for workbook writes.
+- Use `@oai/artifact-tool` from the bundled workspace runtime for all XLSX content and style authoring; do not use `openpyxl`, `xlsxwriter`, pandas, LibreOffice, or a general Excel writer. Per the user's option-A authorization, a standard-library OOXML finalizer may change only the two worksheet XML payloads to add the missing frozen-pane elements and must prove every other ZIP entry payload is byte-identical.
 - Preserve the CP0 workbook's two-row, 17-column header, merged cells, fonts, fills, borders, and sheet names.
 - Populate exactly 45 code-waiver rows: Line 4, Branch 5, Condition 11, Toggle 25, FSM 0.
 - Populate exactly zero function-waiver rows because the DOCX says “未覆盖功能点情况：无”。
@@ -35,6 +35,7 @@
 |`waive/interaction_2_2_cp0_code_waiver_manifest.csv`|Auditable source-of-truth for the 45 CP0 code-waiver rows.|
 |`tests/test_interaction_2_2_cp0_waiver.py`|Enforces manifest counts, workbook equality, blank management fields, and example removal.|
 |`tools/build_interaction_2_2_cp0_waiver.mjs`|Imports the template, writes manifest data, preserves style, renders QA images, and exports XLSX.|
+|`tools/finalize_interaction_2_2_cp0_waiver.py`|Narrowly adds a two-row frozen pane to each worksheet after Artifact Tool export and proves all unrelated ZIP payloads are unchanged.|
 |`tools/check_interaction_2_2_cp0_waiver.py`|Independently reads XLSX OOXML and validates workbook structure/content without artifact-tool.|
 |`waive/08-cp0_代码与功能覆盖率排除列表.xlsx`|Final CP0 workbook deliverable.|
 |`docs/interaction-2.2-followup-review.md`|Closes both README questions and records evidence and remaining VCS/URG boundary.|
@@ -315,13 +316,16 @@ git commit -m "docs: inventory CP0 coverage waivers"
 
 **Files:**
 - Create: `tools/build_interaction_2_2_cp0_waiver.mjs`
+- Create: `tools/finalize_interaction_2_2_cp0_waiver.py`
 - Create: `tools/check_interaction_2_2_cp0_waiver.py`
 - Modify: `waive/08-cp0_代码与功能覆盖率排除列表.xlsx`
 - Modify: `tests/test_interaction_2_2_cp0_waiver.py`
 
 **Interfaces:**
 - Builder entry point: bundled Node.js running `tools/build_interaction_2_2_cp0_waiver.mjs`
+- Pane finalizer entry point: `python3 tools/finalize_interaction_2_2_cp0_waiver.py`
 - Checker entry point: `python3 tools/check_interaction_2_2_cp0_waiver.py`
+- Pane finalizer marker: `CP0_WAIVER_PANES_PASS sheets=2 rows=2`
 - Checker marker: `CP0_WAIVER_WORKBOOK_PASS code_rows=45 function_rows=0 line=4 branch=5 condition=11 toggle=25 fsm=0`
 - Workbook data mapping: manifest fields to A–J and Q; K–P are six empty strings
 
@@ -365,7 +369,7 @@ def check_workbook() -> tuple[int, int, Counter[str]]:
     """Return code rows, function rows, and coverage counts; raise ValueError on drift."""
 ```
 
-Use `zipfile.ZipFile` and `xml.etree.ElementTree` to resolve shared strings, worksheet relationships, cell references, merge ranges, and rows. Assert that code rows 3–47 exactly equal `manifest_row(...)`, function rows 3 onward are empty, K–P are blank, and forbidden example names are absent. Print the deterministic PASS marker only after every assertion succeeds.
+Use `zipfile.ZipFile` and `xml.etree.ElementTree` to resolve shared strings, worksheet relationships, cell references, merge ranges, rows, and worksheet panes. Assert that code rows 3–47 exactly equal `manifest_row(...)`, function rows 3 onward are empty, K–P are blank, forbidden example names are absent, and both sheets serialize a frozen pane with `ySplit="2"`, `topLeftCell="A3"`, no horizontal split, and `state="frozen"` or `state="frozenSplit"`. Print the deterministic PASS marker only after every assertion succeeds.
 
 - [ ] **Step 3: Implement the artifact-tool builder**
 
@@ -390,7 +394,7 @@ function workbookRow(row) {
 }
 ```
 
-Import the supplied CP0 workbook; inspect both sheets; render `A1:Q12` before editing; clear `A3:Q200` on both sheets; copy row-3 formatting to rows 3–47; write all manifest rows in one block; set wrap and vertical top alignment; center A, C, D, I, J, and K–P; apply bounded widths; calculate row heights from longest cell content; freeze two rows; inspect `代码waiver!A1:Q47` and `功能waiver!A1:Q5`; scan formula errors; render code rows 1–14, code rows 36–47, and function rows 1–5; export to the original workbook path.
+Import the supplied CP0 workbook; inspect both sheets; render `A1:Q12` before editing; clear `A3:Q200` on both sheets; copy row-3 formatting to rows 3–47; write all manifest rows in one block; set wrap and vertical top alignment; center A, C, D, I, J, and K–P; apply bounded widths; calculate row heights from longest cell content; call the Artifact Tool freeze API for two rows; inspect `代码waiver!A1:Q47` and `功能waiver!A1:Q5`; scan formula errors; render code rows 1–14, code rows 36–47, and function rows 1–5; export to the original workbook path.
 
 Use these width bounds to preserve the template while keeping narrative fields legible:
 
@@ -401,23 +405,28 @@ const widths = {
 };
 ```
 
-- [ ] **Step 4: Set up the bundled artifact-tool runtime and run the builder**
+- [ ] **Step 4: Implement the narrowly authorized pane finalizer**
+
+Write a standard-library Python tool that resolves the two worksheet paths through `xl/workbook.xml` and its relationships, inserts exactly one `sheetViews/sheetView/pane` structure into each worksheet with `workbookViewId="0"`, `ySplit="2"`, `topLeftCell="A3"`, `activePane="bottomLeft"`, and `state="frozen"`, and refuses unexpected existing pane/view structures. It must preserve every unmodified ZIP entry payload byte-for-byte, preserve `ZipInfo` metadata when rewriting the archive, verify that exactly the two expected worksheet payloads changed, atomically replace the original workbook, and emit `CP0_WAIVER_PANES_PASS sheets=2 rows=2` only after post-write verification succeeds. It must not read or write cell values, styles, merges, shared strings, or workbook metadata.
+
+- [ ] **Step 5: Set up the bundled artifact-tool runtime, run the builder, and finalize panes**
 
 Run using the exact paths returned by the workspace dependency loader:
 
 ```bash
 ln -sfn /Users/mjw/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules node_modules
 /Users/mjw/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node tools/build_interaction_2_2_cp0_waiver.mjs
+python3 tools/finalize_interaction_2_2_cp0_waiver.py
 unlink node_modules
 ```
 
-Expected: builder exits 0, writes the workbook, and emits a `CP0_WAIVER_BUILDER_PASS rows=45` marker. The temporary `node_modules` symlink is not committed.
+Expected: builder emits `CP0_WAIVER_BUILDER_PASS rows=45`; the finalizer emits `CP0_WAIVER_PANES_PASS sheets=2 rows=2`; the temporary `node_modules` symlink is not committed.
 
-- [ ] **Step 5: Inspect values, formulas, and rendered sheets**
+- [ ] **Step 6: Inspect values, formulas, and rendered sheets**
 
 Confirm artifact-tool inspection shows rows 3–47 populated in `代码waiver`, no data in `功能waiver`, no formula-error matches, and blank K–P fields. Open every produced PNG with the local image viewer. Fix clipping, excessive row heights, or unreadable wrapping and rerun the builder until all three final renders are legible.
 
-- [ ] **Step 6: Run the checker and workbook tests**
+- [ ] **Step 7: Run the checker and workbook tests**
 
 Run:
 
@@ -432,7 +441,7 @@ Expected:
 CP0_WAIVER_WORKBOOK_PASS code_rows=45 function_rows=0 line=4 branch=5 condition=11 toggle=25 fsm=0
 ```
 
-- [ ] **Step 7: Inspect the XLSX archive structurally**
+- [ ] **Step 8: Inspect the XLSX archive structurally**
 
 Run:
 
@@ -442,13 +451,14 @@ git diff --check
 git status --short
 ```
 
-Expected: the XLSX archive is valid; only the intended workbook, builder, checker, and test changes are present.
+Expected: the XLSX archive is valid; only the intended workbook, builder, pane finalizer, checker, and test changes are present.
 
-- [ ] **Step 8: Commit the workbook delivery**
+- [ ] **Step 9: Commit the workbook delivery**
 
 ```bash
 git add "waive/08-cp0_代码与功能覆盖率排除列表.xlsx" \
   tools/build_interaction_2_2_cp0_waiver.mjs \
+  tools/finalize_interaction_2_2_cp0_waiver.py \
   tools/check_interaction_2_2_cp0_waiver.py \
   tests/test_interaction_2_2_cp0_waiver.py
 git commit -m "docs: populate CP0 coverage waiver workbook"
