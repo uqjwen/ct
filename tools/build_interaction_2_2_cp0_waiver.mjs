@@ -90,6 +90,13 @@ async function saveInitialRenderOnce(workbook, sheetName, filename) {
 }
 
 
+async function saveFinalRenders(workbook) {
+  await saveRender(workbook, "代码waiver", "A1:Q14", "final-code-rows-1-14.png");
+  await saveRender(workbook, "代码waiver", "A36:Q47", "final-code-rows-36-47.png");
+  await saveRender(workbook, "功能waiver", "A1:Q5", "final-function-rows-1-5.png");
+}
+
+
 function displayUnits(text) {
   let units = 0;
   for (const character of text) {
@@ -116,6 +123,14 @@ function rowHeight(values, widths) {
 
 
 await fs.mkdir(renderDir, { recursive: true });
+if (process.argv.includes("--render-only")) {
+  const renderedInput = await FileBlob.load(workbookPath);
+  const renderedWorkbook = await SpreadsheetFile.importXlsx(renderedInput);
+  await saveFinalRenders(renderedWorkbook);
+  console.log("CP0_WAIVER_RENDER_PASS sheets=2");
+  process.exit(0);
+}
+
 const manifest = parseCsv(await fs.readFile(manifestPath, "utf8"));
 if (manifest.length !== 45) {
   throw new Error(`manifest row count differs: ${manifest.length} != 45`);
@@ -220,7 +235,5 @@ await fs.rm(`${workbookPath}.inspect.ndjson`, { force: true });
 
 const renderedInput = await FileBlob.load(workbookPath);
 const renderedWorkbook = await SpreadsheetFile.importXlsx(renderedInput);
-await saveRender(renderedWorkbook, "代码waiver", "A1:Q14", "final-code-rows-1-14.png");
-await saveRender(renderedWorkbook, "代码waiver", "A36:Q47", "final-code-rows-36-47.png");
-await saveRender(renderedWorkbook, "功能waiver", "A1:Q5", "final-function-rows-1-5.png");
+await saveFinalRenders(renderedWorkbook);
 console.log(`CP0_WAIVER_BUILDER_PASS rows=${manifest.length}`);

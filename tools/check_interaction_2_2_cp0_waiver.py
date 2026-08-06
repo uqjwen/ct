@@ -28,6 +28,8 @@ EXPECTED_SUBHEADERS = (
 EXPECTED_MERGES = {"A1:A2", "B1:B2", "C1:C2", "D1:D2", "E1:E2",
                    "F1:F2", "G1:G2", "H1:H2", "I1:I2", "J1:J2",
                    "K1:L1", "M1:N1", "O1:P1", "Q1:Q2"}
+EXPECTED_PANE = {"state": {"frozen", "frozenSplit"}, "ySplit": 2.0,
+                 "topLeftCell": "A3", "xSplit": 0.0}
 
 SHEET_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -116,7 +118,7 @@ def _sheet_paths(archive: ZipFile) -> dict[str, str]:
 
 def _read_sheet(
     archive: ZipFile, path: str, shared: list[str]
-) -> tuple[dict[int, list[str]], set[str]]:
+) -> tuple[dict[int, list[str]], set[str], dict[str, str] | None]:
     root = ET.fromstring(archive.read(path))
     rows: dict[int, list[str]] = {}
     for row in root.findall(f".//{{{SHEET_NS}}}sheetData/{{{SHEET_NS}}}row"):
@@ -136,7 +138,27 @@ def _read_sheet(
     merges = set() if merge_container is None else {
         merge.attrib["ref"] for merge in merge_container
     }
-    return rows, merges
+    pane = root.find(
+        f"{{{SHEET_NS}}}sheetViews/{{{SHEET_NS}}}sheetView/{{{SHEET_NS}}}pane"
+    )
+    pane_attributes = None if pane is None else dict(pane.attrib)
+    return rows, merges, pane_attributes
+
+
+def _validate_frozen_pane(sheet_name: str, pane: dict[str, str] | None) -> None:
+    if pane is None:
+        raise ValueError(f"{sheet_name} missing serialized frozen pane")
+    if pane.get("state") not in EXPECTED_PANE["state"]:
+        raise ValueError(f"{sheet_name} pane state differs: {pane}")
+    if pane.get("topLeftCell") != EXPECTED_PANE["topLeftCell"]:
+        raise ValueError(f"{sheet_name} pane top-left cell differs: {pane}")
+    try:
+        y_split = float(pane.get("ySplit", "0"))
+        x_split = float(pane.get("xSplit", "0"))
+    except ValueError as error:
+        raise ValueError(f"{sheet_name} pane split is invalid: {pane}") from error
+    if y_split != EXPECTED_PANE["ySplit"] or x_split != EXPECTED_PANE["xSplit"]:
+        raise ValueError(f"{sheet_name} pane split differs: {pane}")
 
 
 def check_workbook() -> tuple[int, int, Counter[str]]:
@@ -152,17 +174,18 @@ def check_workbook() -> tuple[int, int, Counter[str]]:
         paths = _sheet_paths(archive)
         if set(paths) != {"代码waiver", "功能waiver"}:
             raise ValueError(f"unexpected worksheets: {sorted(paths)}")
-        code_rows, code_merges = _read_sheet(
+        code_rows, code_merges, code_pane = _read_sheet(
             archive, paths["代码waiver"], shared
         )
-        function_rows, function_merges = _read_sheet(
+        function_rows, function_merges, function_pane = _read_sheet(
             archive, paths["功能waiver"], shared
         )
 
-    for sheet_name, rows, merges in (
-        ("代码waiver", code_rows, code_merges),
-        ("功能waiver", function_rows, function_merges),
+    for sheet_name, rows, merges, pane in (
+        ("代码waiver", code_rows, code_merges, code_pane),
+        ("功能waiver", function_rows, function_merges, function_pane),
     ):
+        _validate_frozen_pane(sheet_name, pane)
         if merges != EXPECTED_MERGES:
             raise ValueError(f"{sheet_name} merge ranges differ: {sorted(merges)}")
         if tuple(rows.get(1, [])) != EXPECTED_HEADERS:
