@@ -118,6 +118,22 @@ RB_FEATURES = (
 )
 
 
+LRQ_FEATURES = (
+    Feature("三bank容量与no-space预检", "tc_lrq_capacity", "CHK_LRQ_FP01_CAPACITY", "COV_LRQ_FP01_CAPACITY", "P0", ("lsu0_lrq_create_vld", "lsu2_lrq_create_vld", "lsu3_lrq_create_vld"), ("lrq_lsu0_ex1_lrqid", "lrq_lsu2_ex1_lrqid", "lrq_lsu3_ex1_lrqid"), "当三bank `lsu0_lrq_create_vld=1` 等create请求到达时", "则每个被接受bank只选择一个one-hot LRQ entry，no-space bank不建立owner", "empty、one-left、full和同拍pop以{bank,entry,IID,generation}计数"),
+    Feature("create资格与flush取消", "tc_lrq_create_accept", "CHK_LRQ_FP02_CREATE_ACCEPT", "COV_LRQ_FP02_CREATE", "P0", ("lsu0_lrq_create_vld", "rtu_lsu_flush_fe", "lsu0_lrq_create_iid"), ("lrq_lsu0_rf_replay_vld", "lrq_lsu0_ex1_lrqid"), "当 `lsu0_lrq_create_vld=1` 与full或flush边界交叉时", "则仅合格create建立entry；flush取消时create_success=0且不产生raw-pop副作用", "create_vld=1不等于成功，失败原因必须可归因于flush或no-space"),
+    Feature("fresh payload保存", "tc_lrq_payload", "CHK_LRQ_FP03_PAYLOAD", "COV_LRQ_FP03_PAYLOAD", "P0", ("lsu0_lrq_create_vld", "lsu0_lrq_create_va", "lsu0_lrq_create_iid", "lsu0_lrq_create_bytes_vld"), ("lrq_lsu0_rf_va", "lrq_lsu0_rf_iid", "lrq_lsu0_rf_bytes_vld"), "当fresh `lsu0_lrq_create_vld=1` 被接受并等待N拍后replay时", "则VA、IID、mask及适用vector字段逐bit等于create payload", "所有字段使用互异花纹，等待期间owner payload稳定"),
+    Feature("freeze原因集合", "tc_lrq_freeze", "CHK_LRQ_FP04_FREEZE", "COV_LRQ_FP04_FREEZE", "P0", ("lsu0_lrq_create_frz", "lsu0_lrq_create_wait_old_chk", "lsu0_lrq_exx_tlb_wakeup", "lsu0_lrq_ex3_rb_full"), ("lrq_lsu0_rf_replay_vld", "lrq_lsu0_rf_sel"), "当 `lsu0_lrq_create_frz=1` 或MMU、barrier、no-spec、LQ/SQ/RB原因仍有效时", "则entry不得issue；只有全部必要原因解除后 `lrq_lsu0_rf_replay_vld=1`", "每种freeze原因单独及两两组合，解除顺序不改变owner"),
+    Feature("wakeup owner与generation", "tc_lrq_wakeup", "CHK_LRQ_FP05_WAKEUP_OWNER", "COV_LRQ_FP05_WAKEUP", "P0", ("lsu0_lrq_exx_tlb_wakeup", "lsu0_lrq_frz_clr", "lsu0_lrq_create_iid"), ("lrq0_idu_exx_wakeup", "lrq_lsu0_rf_replay_vld"), "当MMU/LFB/SQ/WMB wakeup bitmap命中LRQ bit时", "则wakeup只作用于仍valid且generation匹配的entry；旧 owner wakeup不得修改entry复用后的新owner", "live、killed、已释放和立即复用四类bit均覆盖"),
+    Feature("oldest ready issue", "tc_lrq_oldest_issue", "CHK_LRQ_FP06_OLDEST", "COV_LRQ_FP06_OLDEST", "P0", ("idu_lsu_old_vld", "idu_lsu_old_iid", "lsu0_lrq_create_iid"), ("lrq_lsu0_rf_replay_vld", "lrq_lsu0_rf_iid", "lrq_lsu0_rf_older_vld"), "当多个ready entry竞争且 `idu_lsu_old_vld=1` 时", "则软件age模型认定的最老IID成为唯一replay winner", "普通排序、IID wrap、equal边界和三bank同拍ready均检查one-hot grant"),
+    Feature("replay RF mux与零重建", "tc_lrq_replay", "CHK_LRQ_FP07_REPLAY", "COV_LRQ_FP07_REPLAY", "P0", ("lsu0_lrq_create_vld", "lsu0_lrq_create_boundary", "lsu0_lrq_create_unit_stride"), ("lrq_lsu0_rf_replay_vld", "lrq_lsu0_rf_boundary", "lrq_lsu0_rf_unit_stride"), "当保存的scalar、boundary、vector或US owner被选择replay时", "则RF mux payload属于该entry，replay拍不得再次建立LRQ create", "replay payload不受当前IDU互异输入污染且每个owner只issue一次"),
+    Feature("no-spec与barrier释放", "tc_lrq_barrier", "CHK_LRQ_FP08_BARRIER", "COV_LRQ_FP08_BARRIER", "P1", ("lsu0_lrq_create_no_spec_chk", "lsu0_lrq_create_bar_chk", "idu_lsu0_rf_no_spec_exist"), ("lrq0_hit_no_spec_tbl", "lrq_lsu0_rf_no_spec_exist", "lrq_lsu0_rf_replay_vld"), "当entry带no-spec或barrier检查且前序条件仍存在时", "则不得过早replay；前序条件消失后唯一owner解除freeze", "多bank年龄交叉、逐拍释放和无永久freeze均覆盖"),
+    Feature("DA反馈与entry复用", "tc_lrq_da_feedback", "CHK_LRQ_FP09_DA_FEEDBACK", "COV_LRQ_FP09_DA", "P0", ("lsu0_lrq_ex3_secd", "lsu0_lrq_ex3_already_da", "lsu0_lrq_ex3_spec_fail"), ("lrq_lsu0_rf_already_da", "lrq_lsu0_rf_spec_fail", "lrq0_idu_ex3_pop_vld"), "当DA的secd、already-DA、spec-fail或pop反馈命中live bit时", "则只更新匹配generation的owner；旧反馈零次修改entry复用后的新owner", "反馈与flush、pop、create同拍时按{bank,entry,IID,generation}判定"),
+    Feature("full/check flush年龄清除", "tc_lrq_flush", "CHK_LRQ_FP10_FLUSH", "COV_LRQ_FP10_FLUSH", "P0", ("lsu0_lrq_create_vld", "rtu_lsu_flush_fe", "rtu_ck_flush", "rtu_ck_flush_iid"), ("lrq_lsu0_rf_replay_vld", "lrq_lsu0_ex1_lrqid", "lrq0_idu_exx_wakeup"), "当full flush或check flush命中live entry时", "则full flush清全部，check flush仅清更年轻未提交owner，killed entry不再replay或wakeup", "IID older/equal/newer及wrap与create/wakeup/issue边界交叉"),
+    Feature("entry clock reset", "tc_lrq_clock_reset", "CHK_LRQ_FP11_CLOCK_RESET", "COV_LRQ_FP11_CLOCK", "P1", ("lsu0_lrq_create_vld", "cp0_lsu_icg_en", "pad_yy_icg_scan_en"), ("lrq_lsu0_rf_replay_vld", "lrq_lsu0_ex1_lrqid"), "当ICG关闭、scan开启或reset命中entry更新边界时", "则功能valid打开相应数据钟，reset后valid与replay为0", "valid gate与data gate一致，reset释放首拍无幽灵owner"),
+    Feature("LRQENTRY与LSIQENTRY参数合同", "tc_lrq_parameter_contract", "CHK_LRQ_FP12_PARAMETER", "COV_LRQ_FP12_PARAMETER", "P2", ("lsu0_lrq_create_vld", "lsu0_lrq_pop_entry"), ("lrq_lsu0_ex1_lrqid", "lrq0_idu_exx_wakeup"), "当正式配置下 `lsu0_lrq_create_vld=1` 并使用LRQ/LSIQ bitmap时", "则 `LRQENTRY=LSIQENTRY` 的elaboration合同成立且bitmap无静默截断", "正式相等配置必须通过；故意不等宽配置要求静态assert明确失败"),
+)
+
+
 CONFIGS = {
     "xx_lsu_ld_dc": Environment(
         name="xx_lsu_ld_dc",
@@ -182,6 +198,22 @@ CONFIGS = {
         features=RB_FEATURES,
         doc_tokens=("- Scoreboard键为 `{entry, IID, generation, BIU ID, owner}`，entry复用必须递增generation。", "- unit-stride R response必须恰好两拍；B response必须按BIU ID与原owner配对。", "- sync flush、check flush与async flush分别验证，不把不可取消的总线事务误报为新副作用。"),
     ),
+    "xx_lsu_lrq": Environment(
+        name="xx_lsu_lrq",
+        prefix="LRQ",
+        source="srcs/xx_lsu_lrq.sv",
+        feature_doc="doc-lrq/xx_lsu_lrq_feature_test_plan.md",
+        runbook="doc-lrq/xx_lsu_lrq_vcs_verification.md",
+        clock="forever_cpuclk",
+        reset="cpurst_b",
+        flush="rtu_lsu_flush_fe",
+        parameters={"PREG": 7, "VREG": 6, "IID_WIDTH": 10, "VMBENTRY": 8, "LRQENTRY": 12, "PC_LEN": 15, "LSIQENTRY": 12, "SDIQENTRY": 12},
+        idle_overrides={"lsu_special_clk": None, "cp0_lsu_icg_en": "1'b1"},
+        declared_stubs=("gated_clk_cell", "xx_lsu_compare_iid"),
+        production_sources=("srcs/xx_lsu_lrq_entry.sv",),
+        features=LRQ_FEATURES,
+        doc_tokens=("- create_vld=1只表示raw请求；与flush交叉时必须记录create_success=0。", "- Scoreboard按 `{bank, entry, IID, generation}` 跟踪旧 owner、entry复用和所有wakeup来源。"),
+    ),
 }
 
 
@@ -228,6 +260,7 @@ def _scenario_variants(config: Environment, index: int, feature: Feature) -> lis
         "DA": "lda_ex3_inst_vld",
         "WB": "lwb_ex4_inst_vld",
         "RB": "rb_biu_ar_req",
+        "LRQ": "lrq_lsu0_rf_replay_vld",
     }.get(config.prefix, primary_observe)
     templates = (
         ("名义accept", "复位释放、无flush且所有非目标输入idle", feature.drive, "C0: 驱动名义输入；C1: 采样目标输出", f"{feature.trigger}；触发信号 `{primary_drive}`", feature.observe, f"{feature.expected}；交付信号 `{primary_observe}`", feature.closure),

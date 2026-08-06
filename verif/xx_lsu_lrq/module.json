@@ -1,0 +1,37 @@
+{
+  "env_name": "xx_lsu_lrq",
+  "dut_module": "xx_lsu_lrq",
+  "dut_source": "srcs/xx_lsu_lrq.sv",
+  "feature_doc": "doc-lrq/xx_lsu_lrq_feature_test_plan.md",
+  "runbook": "doc-lrq/xx_lsu_lrq_vcs_verification.md",
+  "feature_prefix": "LRQ",
+  "expected_features": 12,
+  "min_scenarios_per_feature": 6,
+  "clock": "forever_cpuclk",
+  "reset": "cpurst_b",
+  "parameters": {
+    "PREG": 7,
+    "VREG": 6,
+    "IID_WIDTH": 10,
+    "VMBENTRY": 8,
+    "LRQENTRY": 12,
+    "PC_LEN": 15,
+    "LSIQENTRY": 12,
+    "SDIQENTRY": 12
+  },
+  "idle_overrides": {
+    "lsu_special_clk": null,
+    "cp0_lsu_icg_en": "1'b1"
+  },
+  "production_sources": [
+    "srcs/xx_lsu_lrq_entry.sv"
+  ],
+  "declared_stubs": [
+    "gated_clk_cell",
+    "xx_lsu_compare_iid"
+  ],
+  "stub_results": {
+    "gated_clk_cell": "PENDING_FULL_CHIP",
+    "xx_lsu_compare_iid": "PENDING_FULL_CHIP"
+  }
+}

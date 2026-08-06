@@ -1,0 +1,12 @@
+tc_lrq_capacity
+tc_lrq_create_accept
+tc_lrq_payload
+tc_lrq_freeze
+tc_lrq_wakeup
+tc_lrq_oldest_issue
+tc_lrq_replay
+tc_lrq_barrier
+tc_lrq_da_feedback
+tc_lrq_flush
+tc_lrq_clock_reset
+tc_lrq_parameter_contract
