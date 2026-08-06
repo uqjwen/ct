@@ -6,7 +6,7 @@
   "runbook": "doc-ag/xx_lsu_ld_ag_vcs_verification.md",
   "feature_prefix": "AG",
   "expected_features": 12,
-  "min_scenarios_per_feature": 4,
+  "min_scenarios_per_feature": 8,
   "clock": "forever_cpuclk",
   "reset": "cpurst_b",
   "parameters": {

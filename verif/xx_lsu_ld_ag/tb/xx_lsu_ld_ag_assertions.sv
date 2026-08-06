@@ -22,6 +22,9 @@ module xx_lsu_ld_ag_assertions #(
   input logic                  mmu_lsu_page_fault,
   input logic                  mmu_lsu_access_fault,
   input logic                  lsu_mmu_abort,
+  input logic                  idu_lsu_rf_older_vld,
+  input logic                  ld_ag_stall_mask,
+  input logic                  lag_lrq_create_already,
   input logic                  lag_ldc_ex1_expt_vld,
   input logic                  lag_ldc_ex1_expt_page_fault,
   input logic                  lag_ldc_ex1_expt_access_fault_with_page,
@@ -88,6 +91,19 @@ module xx_lsu_ld_ag_assertions #(
   COV_FP05_STALL_REASON:
     cover property (lag_ex1_inst_vld ##1 lag_ex1_stall_ori
                     ##1 |lag_ex1_stall_restart_entry);
+  CHK_FP05_MASK_ABORT_REPLAY:
+    assert property (lag_ex1_stall_ori && ld_ag_stall_mask
+                     && idu_lsu_rf_older_vld && !mmu_lsu_pa_vld
+                     && lsu_mmu_abort
+                     |-> !lsu_lrq_create_frz
+                         && (!lag_lrq_create_already
+                             || |lag_ex1_stall_restart_entry))
+      else $fatal(1, "AG-FP-05 masked aborted miss was not replayable");
+  COV_FP05_MASK_ABORT_TABLE:
+    cover property (lag_ex1_stall_ori && idu_lsu_rf_older_vld
+                    && !mmu_lsu_pa_vld && lsu_mmu_abort
+                    && !lsu_lrq_create_frz
+                    && |lag_ex1_stall_restart_entry);
 
   CHK_FP06_DC_REQ_VALID:
     assert property ((|lag_dcache_arb_ex1_data_req)

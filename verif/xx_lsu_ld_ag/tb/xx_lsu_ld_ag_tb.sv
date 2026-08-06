@@ -52,6 +52,9 @@ module xx_lsu_ld_ag_tb;
     .mmu_lsu_page_fault                       (bus.mmu_lsu_page_fault),
     .mmu_lsu_access_fault                     (bus.mmu_lsu_access_fault),
     .lsu_mmu_abort                            (bus.lsu_mmu_abort),
+    .idu_lsu_rf_older_vld                     (bus.idu_lsu_rf_older_vld),
+    .ld_ag_stall_mask                         (dut.ld_ag_stall_mask),
+    .lag_lrq_create_already                   (dut.lag_lrq_create_already),
     .lag_ldc_ex1_expt_vld                     (bus.lag_ldc_ex1_expt_vld),
     .lag_ldc_ex1_expt_page_fault              (bus.lag_ldc_ex1_expt_page_fault),
     .lag_ldc_ex1_expt_access_fault_with_page  (
@@ -354,6 +357,38 @@ module xx_lsu_ld_ag_tb;
     launch_scalar(64'h0000_0000_0050_1000, 12'h000, 2'b11, 7'h42);
     expect_true(bus.lag_ex1_stall_ori,
                 "replay D-cache rejection did not stall");
+    drain();
+
+    // AG-FP-05-S07: an older RF request displaces a structurally stalled
+    // owner while PA is absent.  The delayed access-fault path aborts the MMU
+    // request without directly driving lsu_mmu_abort, so the created LRQ owner
+    // must be immediately replayable instead of frozen.
+    apply_reset();
+    bus.dcache_arb_lag_ex1_sel = 1'b0;
+    bus.lrq_lsu_ex1_lrqid = 12'b0000_0010_0000;
+    launch_scalar(64'h0000_0000_0050_2000, 12'h000, 2'b11, 7'h43);
+    expect_true(bus.lag_ex1_stall_ori,
+                "setup did not establish the structural AG stall");
+    tick(1);
+    @(negedge bus.forever_cpuclk);
+    clear_rf();
+    bus.idu_lsu_rf_gateclk_sel = 1'b1;
+    bus.idu_lsu_rf_sel = 1'b1;
+    bus.idu_lsu_rf_iid = 7'h20;
+    bus.idu_lsu_rf_older_vld = 1'b1;
+    bus.mmu_lsu_pa_vld = 1'b0;
+    bus.mmu_lsu_access_fault = 1'b1;
+    #1;
+    expect_true(bus.lag_ex1_stall_ori && dut.ld_ag_stall_mask,
+                "older RF request did not mask the active AG stall");
+    expect_true(bus.lsu_mmu_abort,
+                "delayed access fault did not abort the missing-PA request");
+    expect_true(!bus.lsu_lrq_create_frz,
+                "masked aborted miss incorrectly froze its LRQ entry");
+    expect_true(|bus.lag_ex1_stall_restart_entry,
+                "masked aborted miss omitted immediate LRQ replay bitmap");
+    tick(1);
+    bus.mmu_lsu_pa_vld = 1'b1;
     drain();
   endtask
 
