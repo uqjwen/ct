@@ -1,0 +1,16 @@
++incdir+verif/xx_lsu_ld_dc/tb
++define+TDT_MP_HINFO_WIDTH=17
++define+VL_WIDTH=8
++define+VSTART_WIDTH=7
++define+WK_PA_WIDTH=40
++define+WK_VA_WIDTH=48
++define+WK_MA_WIDTH=40
++define+WK_LS_DCACHE_SINGLE_TAG_WIDTH=26
++define+WK_LS_DCACHE_SINGLE_LDTAG_WIDTH=27
++define+WK_LS_DCACHE_DOUBLE_LDTAG_WIDTH=54
++define+WK_LS_DCACHE_TRIPLE_LDTAG_WIDTH=81
++define+WK_LS_DCACHE_LDTAG_WIDTH=108
+verif/xx_lsu_ld_dc/tb/xx_lsu_ld_dc_deps.sv
+srcs/xx_lsu_ld_dc.sv
+verif/xx_lsu_ld_dc/tb/xx_lsu_ld_dc_assertions.sv
+verif/xx_lsu_ld_dc/tb/xx_lsu_ld_dc_tb.sv

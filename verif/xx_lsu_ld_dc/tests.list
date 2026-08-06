@@ -1,0 +1,12 @@
+tc_dc_ex1_ex2_owner
+tc_dc_borrow_owner
+tc_dc_tag_way
+tc_dc_unit_stride_way
+tc_dc_byte_masks
+tc_dc_lq_create
+tc_dc_restart
+tc_dc_exception
+tc_dc_forward
+tc_dc_da_transfer
+tc_dc_debug_pulse
+tc_dc_clock_reset

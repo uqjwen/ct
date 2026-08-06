@@ -1,0 +1,37 @@
+{
+  "env_name": "xx_lsu_ld_dc",
+  "dut_module": "xx_lsu_ld_dc",
+  "dut_source": "srcs/xx_lsu_ld_dc.sv",
+  "feature_doc": "doc-dc/xx_lsu_ld_dc_feature_test_plan.md",
+  "runbook": "doc-dc/xx_lsu_ld_dc_vcs_verification.md",
+  "feature_prefix": "DC",
+  "expected_features": 12,
+  "min_scenarios_per_feature": 6,
+  "clock": "forever_cpuclk",
+  "reset": "cpurst_b",
+  "parameters": {
+    "VB_DATA_ENTRY": 3,
+    "LQENTRY": 48,
+    "LSIQENTRY": 12,
+    "VMBENTRY": 8,
+    "PC_LEN": 15,
+    "IID_WIDTH": 7,
+    "VREG": 6,
+    "PREG": 7
+  },
+  "idle_overrides": {
+    "ctrl_ld_clk": null,
+    "cp0_lsu_icg_en": "1'b1",
+    "cp0_lsu_dcache_en": "1'b1",
+    "lsu_dcache_ld_xx_gwen": "'1"
+  },
+  "production_sources": [],
+  "declared_stubs": [
+    "gated_clk_cell",
+    "xx_lsu_compare_iid"
+  ],
+  "stub_results": {
+    "gated_clk_cell": "PENDING_FULL_CHIP",
+    "xx_lsu_compare_iid": "PENDING_FULL_CHIP"
+  }
+}
