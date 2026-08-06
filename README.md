@@ -92,3 +92,9 @@
 2. 按照这种方法，生成其他模块的功能点和测试计划，同样在verif中构建验证环境。包括dc, da, wb, rb, lrq, lfb模块。
 3. 在waive文件夹中doc文档是代码覆盖率waive机器说明文档，根据该文档的内容，填写excel文档。
 ***
+
+# interaction 2.2
+###
+1. 针对AG-FP-05，“预期 lsu_lrq_create_frz=0 且 lag_ex1_stall_restart_entry 非零。该路径由真实MMU输入驱动，未直接强制DUT输出”，具体是什么意思，表示这个并不是dut的一个功能点？
+2. waive目录更新了cp0的waive的doc文档，请按照excel文档格式要求，完善excel文档。
+###
