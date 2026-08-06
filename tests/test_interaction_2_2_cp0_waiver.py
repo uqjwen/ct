@@ -13,6 +13,10 @@ FIELDS = (
     "condition", "reason", "impact", "alternative", "property",
     "term", "remarks",
 )
+PASS_MARKER = (
+    "CP0_WAIVER_WORKBOOK_PASS code_rows=45 function_rows=0 "
+    "line=4 branch=5 condition=11 toggle=25 fsm=0"
+)
 
 
 def read_manifest() -> list[dict[str, str]]:
@@ -45,4 +49,4 @@ class Interaction22Cp0WaiverTests(unittest.TestCase):
             capture_output=True,
         )
         self.assertEqual(0, completed.returncode, completed.stderr)
-        self.assertIn("CP0_WAIVER_WORKBOOK_PASS", completed.stdout)
+        self.assertEqual(PASS_MARKER, completed.stdout.strip())
