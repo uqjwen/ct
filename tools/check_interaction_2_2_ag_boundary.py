@@ -67,20 +67,87 @@ def _is_driven_with(scenario: str, signal: str, value: str) -> bool:
 
 
 def _is_observed(scenario: str, signal: str) -> bool:
-    return re.search(
-        rf"\bexpect_true\s*\((?:(?!;).)*?\bbus\.{re.escape(signal)}\b",
-        scenario,
-        flags=re.DOTALL,
-    ) is not None
+    executable = _executable_text(scenario)
+    call_start = 0
+    while (match := re.search(r"\bexpect_true\s*\(", executable[call_start:])) is not None:
+        predicate_start = call_start + match.end()
+        depth = 0
+        for index in range(predicate_start, len(executable)):
+            char = executable[index]
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                if depth == 0:
+                    predicate = executable[predicate_start:index]
+                    break
+                depth -= 1
+            elif char == "," and depth == 0:
+                predicate = executable[predicate_start:index]
+                break
+        else:
+            return False
+        if re.search(rf"\b(?:bus|dut)\.{re.escape(signal)}\b", predicate):
+            return True
+        call_start = index + 1
+    return False
+
+
+def _executable_text(text: str) -> str:
+    result: list[str] = []
+    index = 0
+    while index < len(text):
+        if text.startswith("//", index):
+            newline = text.find("\n", index)
+            if newline < 0:
+                break
+            result.append("\n")
+            index = newline + 1
+        elif text.startswith("/*", index):
+            end = text.find("*/", index + 2)
+            comment = text[index:] if end < 0 else text[index:end + 2]
+            result.append("".join("\n" if char == "\n" else " " for char in comment))
+            index = len(text) if end < 0 else end + 2
+        elif text[index] == '"':
+            end = index + 1
+            while end < len(text):
+                if text[end] == "\\":
+                    end += 2
+                elif text[end] == '"':
+                    end += 1
+                    break
+                else:
+                    end += 1
+            string = text[index:end]
+            result.append("".join("\n" if char == "\n" else " " for char in string))
+            index = end
+        else:
+            result.append(text[index])
+            index += 1
+    return "".join(result)
+
+
+def _parenthesis_depth(text: str, position: int) -> int:
+    depth = 0
+    for char in text[:position]:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+    return depth
 
 
 def _is_assigned(task_body: str, signal: str) -> bool:
-    return re.search(
-        rf"^\s*(?:assign\s+|force\s+)?(?:bus\.|dut\.)?{re.escape(signal)}\s*"
-        r"(?:=|<=|\+=|-=|\*=|/=|&=|\|=|\^=)",
-        task_body,
-        flags=re.MULTILINE,
-    ) is not None
+    executable = _executable_text(task_body)
+    pattern = re.compile(rf"\b(?:(force)\s+)?(?:bus\.|dut\.){re.escape(signal)}\b")
+    for match in pattern.finditer(executable):
+        if _parenthesis_depth(executable, match.start()) != 0:
+            continue
+        if match.group(1) is not None:
+            return True
+        suffix = executable[match.end():]
+        if re.match(r"\s*(?:=(?!=)|<=|\+=|-=|\*=|/=|&=|\|=|\^=)", suffix):
+            return True
+    return False
 
 
 def check() -> None:
