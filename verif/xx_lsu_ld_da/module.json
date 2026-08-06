@@ -1,0 +1,48 @@
+{
+  "env_name": "xx_lsu_ld_da",
+  "dut_module": "xx_lsu_ld_da",
+  "dut_source": "srcs/xx_lsu_ld_da.sv",
+  "feature_doc": "doc-da/xx_lsu_ld_da_feature_test_plan.md",
+  "runbook": "doc-da/xx_lsu_ld_da_vcs_verification.md",
+  "feature_prefix": "DA",
+  "expected_features": 12,
+  "min_scenarios_per_feature": 6,
+  "clock": "forever_cpuclk",
+  "reset": "cpurst_b",
+  "parameters": {
+    "VB_DATA_ENTRY": 3,
+    "LQENTRY": 48,
+    "LSIQENTRY": 12,
+    "SQ_ENTRY": 12,
+    "WMB_ENTRY": 8,
+    "VMB_ENTRY": 8,
+    "PC_LEN": 15,
+    "IID_WIDTH": 7,
+    "VREG": 6,
+    "PREG": 7
+  },
+  "idle_overrides": {
+    "ctrl_ld_clk": null,
+    "lsu_special_clk": null,
+    "cp0_lsu_icg_en": "1'b1",
+    "cp0_lsu_dcache_en": "1'b1",
+    "cp0_lsu_ecc_en": "1'b1"
+  },
+  "production_sources": [],
+  "declared_stubs": [
+    "gated_clk_cell",
+    "xx_lsu_compare_iid",
+    "xx_lsu_rot_data",
+    "xx_lsu_27bit_2stage_ecc_decode",
+    "xx_lsu_32bit_ecc_decode",
+    "xx_lsu_35bit_2stage_ecc_decode"
+  ],
+  "stub_results": {
+    "gated_clk_cell": "PENDING_FULL_CHIP",
+    "xx_lsu_compare_iid": "PENDING_FULL_CHIP",
+    "xx_lsu_rot_data": "PENDING_FULL_CHIP",
+    "xx_lsu_27bit_2stage_ecc_decode": "PENDING_FULL_CHIP",
+    "xx_lsu_32bit_ecc_decode": "PENDING_FULL_CHIP",
+    "xx_lsu_35bit_2stage_ecc_decode": "PENDING_FULL_CHIP"
+  }
+}

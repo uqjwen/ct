@@ -69,6 +69,22 @@ DC_FEATURES = (
 )
 
 
+DA_FEATURES = (
+    Feature("D-cache 16 bank数据选择", "tc_da_cache_data", "CHK_DA_FP01_DATA_SELECT", "COV_DA_FP01_DATA", "P0", ("ldc_lda_ex2_inst_vld", "ldc_lda_ex2_get_dcache_data", "dcache_lsu_ld_data_bank0_dout", "dcache_lsu_ld_data_bank4_dout", "dcache_lsu_ld_data_bank8_dout", "dcache_lsu_ld_data_bank12_dout"), ("lda_rb_ex3_data_ori", "lda_rb_ex3_data_ori1", "lda_rb_ex3_data_ori2", "lda_rb_ex3_data_ori3"), "当 `ldc_lda_ex2_inst_vld=1` 且四个region选择位有效时", "则 `lda_rb_ex3_data_ori` 至data_ori3分别对应四块互异数据且owner一致", "16 bank至四个128-bit block的选择逐bit匹配"),
+    Feature("SQ/WMB forward merge", "tc_da_forward_merge", "CHK_DA_FP02_FORWARD", "COV_DA_FP02_FORWARD", "P0", ("ldc_lda_ex2_inst_vld", "ldc_lda_ex2_fwd_sq_vld", "ldc_lda_ex2_fwd_wmb_vld", "sq_lda_ex2_fwd_data", "wmb_lda_fwd_data"), ("lda_rb_ex3_data_ori", "lda_ex3_fwd_ecc_stall"), "当 `ldc_lda_ex2_fwd_sq_vld=1` 或 `ldc_lda_ex2_fwd_wmb_vld=1` 时", "则 `lda_rb_ex3_data_ori` 按byte mask合并选定source且未覆盖byte保持cache数据", "SQ-only、WMB-only、冲突和无forward均使用互异花纹"),
+    Feature("ECC检测与replay", "tc_da_ecc_replay", "CHK_DA_FP03_ECC", "COV_DA_FP03_ECC", "P0", ("ldc_lda_ex2_inst_vld", "cp0_lsu_ecc_en", "dcache_lsu_ld_data_bank0_dout"), ("lda_ex2_ecc_stall", "lda_ex3_ecc_wakeup", "lda_rb_ex3_ecc_mask"), "当 `cp0_lsu_ecc_en=1` 且选中bank注入单比特或双比特错误时", "则可纠错错误更新数据，fatal错误使 `lda_ex2_ecc_stall=1` 并产生唯一replay/wakeup", "无错、单错、双错和连续错误均有明确终态"),
+    Feature("延迟MMU access fault", "tc_da_access_fault", "CHK_DA_FP04_ACCESS_FAULT", "COV_DA_FP04_ACCESS_FAULT", "P0", ("ldc_lda_ex2_inst_vld", "mmu_lsu_access_fault0", "ldc_lda_ex2_expt_access_fault_mask"), ("lda_lwb_ex3_expt_vld", "lda_rb_ex3_expt_vld"), "当live EX3 owner对应的 `mmu_lsu_access_fault0=1` 时", "则 `lda_lwb_ex3_expt_vld=1` 或RB异常路径有效，且mtval/IID仍属于原owner", "0/1/N拍fault不串到下一owner"),
+    Feature("LQ entry pop", "tc_da_lq_pop", "CHK_DA_FP05_LQ_POP", "COV_DA_FP05_LQ_POP", "P0", ("ldc_lda_ex2_inst_vld", "ldc_lda_ex2_lq_entry", "ldc_lda_ex2_spec_fail"), ("lda_ex3_lq_entry_pop", "lda_idu_ex3_pop_vld", "lda_idu_ex3_pop_entry"), "当 `ldc_lda_ex2_inst_vld=1` 到达唯一终态且无需restart时", "则 `lda_ex3_lq_entry_pop` 只包含原LQ entry且 `lda_idu_ex3_pop_vld=1`", "LQ pop每个owner恰好一次，flush/restart为零次"),
+    Feature("RB create与merge", "tc_da_rb_create_merge", "CHK_DA_FP06_RB_OWNER", "COV_DA_FP06_RB", "P0", ("ldc_lda_ex2_inst_vld", "rb_lda_ex3_full", "rb_lda_ex3_hit_idx"), ("lda_rb_ex3_create_vld", "lda_rb_ex3_merge_vld", "lda_rb_ex3_create_lfb"), "当 `ldc_lda_ex2_inst_vld=1` 且RB非full时", "则miss产生唯一 `lda_rb_ex3_create_vld=1`，命中产生 `lda_rb_ex3_merge_vld=1`，两者互斥", "RB create/merge winner与payload owner一致"),
+    Feature("WB completion请求", "tc_da_completion", "CHK_DA_FP07_COMPLETION", "COV_DA_FP07_COMPLETION", "P0", ("ldc_lda_ex2_inst_vld", "ldc_lda_ex2_expt_vld_except_access_err", "rb_lda_ex3_full"), ("lda_lwb_ex3_cmplt_req", "lda_lwb_ex3_cmplt_req_gate"), "当 `ldc_lda_ex2_inst_vld=1` 的load在DA到达completion终态时", "则 `lda_lwb_ex3_cmplt_req=1` 必须伴随 `lda_lwb_ex3_cmplt_req_gate=1` 且只脉冲一次", "completion与RB create、restart终态互斥"),
+    Feature("WB scalar/vector data请求", "tc_da_data_request", "CHK_DA_FP08_DATA_REQ", "COV_DA_FP08_DATA", "P0", ("ldc_lda_ex2_inst_vld", "ldc_lda_ex2_inst_vls", "ldc_lda_ex2_inst_us"), ("lda_lwb_ex3_data_req", "lda_lwb_ex3_data_req_dp", "lda_lwb_ex3_data", "lda_lwb_ex3_data1", "lda_lwb_ex3_data2", "lda_lwb_ex3_data3"), "当无异常且 `ldc_lda_ex2_inst_vld=1` 的owner命中数据时", "则 `lda_lwb_ex3_data_req=1` 蕴含DP/gate有效，scalar只用data0，US检查四块互异数据", "数据请求、mask和owner元数据同拍一致"),
+    Feature("异常restart唯一终态", "tc_da_terminal_state", "CHK_DA_FP09_TERMINAL", "COV_DA_FP09_TERMINAL", "P0", ("ldc_lda_ex2_inst_vld", "ldc_lda_ex2_spec_fail", "rb_lda_ex3_full"), ("lda_lwb_ex3_expt_vld", "lda_idu_ex3_pop_vld", "lda_rb_ex3_create_vld"), "当 `ldc_lda_ex2_inst_vld=1` 且异常、spec-fail或RB full条件命中时", "则completion、RB create、LQ pop、restart中恰有一个唯一终态，`lda_lwb_ex3_expt_vld` 仅随异常owner", "所有两两交叉无双重副作用"),
+    Feature("LFB/LRQ dependency wakeup", "tc_da_dependency", "CHK_DA_FP10_WAKEUP", "COV_DA_FP10_WAKEUP", "P0", ("ldc_lda_ex2_inst_vld", "ldc_lda_ex2_lsid", "ldc_lda_ex2_spec_fail"), ("lda_lfb_set_wakeup_queue", "lda_lfb_ex3_wakeup_queue_next", "lda_idu_ex3_already_da"), "当 `ldc_lda_ex2_inst_vld=1` 的owner产生LFB依赖或DA反馈时", "则 `lda_lfb_set_wakeup_queue` 和LRQ bitmap只包含保存LSID且每个事件一次", "flush后零次迟到wakeup，entry复用不串owner"),
+    Feature("debug halt-info副作用", "tc_da_debug", "CHK_DA_FP11_DEBUG", "COV_DA_FP11_DEBUG", "P1", ("ldc_lda_ex2_inst_vld", "dtu_lsu_addr_halt_info", "dtu_lsu_data_trig_en"), ("ld_da_idu_halt_info_update_vld", "ld_da_idu_halt_info", "ld_da_dtu_addr_halt_info_stall_vld"), "当 `dtu_lsu_data_trig_en=1` 命中live owner时", "则 `ld_da_idu_halt_info_update_vld` 仅更新该owner，cancel/flush后不产生迟到副作用", "halt-info、IID和触发类型三者一致"),
+    Feature("flush与clock边界", "tc_da_flush_clock", "CHK_DA_FP12_FLUSH_CLOCK", "COV_DA_FP12_CLOCK", "P1", ("ldc_lda_ex2_inst_vld", "rtu_lsu_flush_fe", "cp0_lsu_icg_en"), ("lda_ex3_inst_vld", "lda_ex3_special_gateclk_en"), "当 `rtu_lsu_flush_fe=1` 或reset命中live DA owner时", "则下一拍 `lda_ex3_inst_vld=0`，ICG/scan只改变clock可达性而不改变功能owner", "flush后completion/data/RB/LQ副作用均为零"),
+)
+
+
 CONFIGS = {
     "xx_lsu_ld_dc": Environment(
         name="xx_lsu_ld_dc",
@@ -83,6 +99,21 @@ CONFIGS = {
         declared_stubs=("gated_clk_cell", "xx_lsu_compare_iid"),
         production_sources=(),
         features=DC_FEATURES,
+    ),
+    "xx_lsu_ld_da": Environment(
+        name="xx_lsu_ld_da",
+        prefix="DA",
+        source="srcs/xx_lsu_ld_da.sv",
+        feature_doc="doc-da/xx_lsu_ld_da_feature_test_plan.md",
+        runbook="doc-da/xx_lsu_ld_da_vcs_verification.md",
+        clock="forever_cpuclk",
+        reset="cpurst_b",
+        parameters={"VB_DATA_ENTRY": 3, "LQENTRY": 48, "LSIQENTRY": 12, "SQ_ENTRY": 12, "WMB_ENTRY": 8, "VMB_ENTRY": 8, "PC_LEN": 15, "IID_WIDTH": 7, "VREG": 6, "PREG": 7},
+        idle_overrides={"ctrl_ld_clk": None, "lsu_special_clk": None, "cp0_lsu_icg_en": "1'b1", "cp0_lsu_dcache_en": "1'b1", "cp0_lsu_ecc_en": "1'b1"},
+        declared_stubs=("gated_clk_cell", "xx_lsu_compare_iid", "xx_lsu_rot_data", "xx_lsu_27bit_2stage_ecc_decode", "xx_lsu_32bit_ecc_decode", "xx_lsu_35bit_2stage_ecc_decode"),
+        production_sources=(),
+        features=DA_FEATURES,
+        doc_tokens=("- 四块互异数据用于验证data0/data1/data2/data3不串区。", "- completion、RB create、LQ pop、restart必须形成唯一终态。"),
     ),
 }
 
@@ -125,7 +156,10 @@ def _scenario_variants(config: Environment, index: int, feature: Feature) -> lis
     feature_id = f"{config.prefix}-FP-{index:02d}"
     primary_drive = feature.drive[0]
     primary_observe = feature.observe[0]
-    common_observe = "ldc_lda_ex2_inst_vld" if config.prefix == "DC" else primary_observe
+    common_observe = {
+        "DC": "ldc_lda_ex2_inst_vld",
+        "DA": "lda_ex3_inst_vld",
+    }.get(config.prefix, primary_observe)
     templates = (
         ("名义accept", "复位释放、无flush且所有非目标输入idle", feature.drive, "C0: 驱动名义输入；C1: 采样目标输出", feature.trigger, feature.observe, feature.expected, feature.closure),
         ("连续两拍保持", "先建立同一owner并施加两拍合法反压", feature.drive, "C0: 建立owner；C1: 首次采样；C2: 保持输入再次采样", f"当 `{primary_drive}=1` 且同一owner连续保持两拍时", feature.observe, f"则 C1至C2 `{primary_observe}` 保持二态且只归属于同一owner", "两拍保持期间payload hash和owner均不漂移"),
@@ -252,7 +286,11 @@ def _testbench(config: Environment, port_map: Mapping[str, Port]) -> str:
     for index, connection in enumerate(assertion_connections):
         comma = "," if index + 1 < len(assertion_connections) else ""
         lines.append(connection + comma)
-    lines.extend(("  );", "", f"  assign bus.ctrl_ld_clk = bus.{config.clock};" if "ctrl_ld_clk" in port_map else "", "", f"  initial bus.{config.clock} = 1'b0;", f"  always #5 bus.{config.clock} = ~bus.{config.clock};", "", "  task automatic tick(input int cycles = 1);", f"    repeat (cycles) begin @(posedge bus.{config.clock}); #1; end", "  endtask", "", "  task automatic expect_known(input logic value, input string label);", "    if ($isunknown(value)) $fatal(1, \"CHECK_FAIL: %s\", label);", "  endtask", "", "  task automatic apply_reset();", "    bus.drive_idle();", f"    bus.{config.reset} = 1'b0;", "    tick(3);", f"    bus.{config.reset} = 1'b1;", "    tick(1);", "  endtask", ""))
+    lines.append("  );")
+    for alias, value in config.idle_overrides.items():
+        if value is None and alias in port_map and alias != config.clock and "clk" in alias:
+            lines.append(f"  assign bus.{alias} = bus.{config.clock};")
+    lines.extend(("", f"  initial bus.{config.clock} = 1'b0;", f"  always #5 bus.{config.clock} = ~bus.{config.clock};", "", "  task automatic tick(input int cycles = 1);", f"    repeat (cycles) begin @(posedge bus.{config.clock}); #1; end", "  endtask", "", "  task automatic expect_known(input logic value, input string label);", "    if ($isunknown(value)) $fatal(1, \"CHECK_FAIL: %s\", label);", "  endtask", "", "  task automatic apply_reset();", "    bus.drive_idle();", f"    bus.{config.reset} = 1'b0;", "    tick(3);", f"    bus.{config.reset} = 1'b1;", "    tick(1);", "  endtask", ""))
     for feature in config.features:
         lines.extend((f"  task automatic {feature.testcase}();", "    apply_reset();", f"    @(negedge bus.{config.clock});"))
         for signal in feature.drive:
@@ -283,13 +321,46 @@ endmodule""")
   logic [IID_WIDTH-1:0] distance;
   always_comb begin distance = x_iid1 - x_iid0; x_iid0_older = (x_iid0 != x_iid1) && !distance[IID_WIDTH-1]; end
 endmodule""")
+    if "xx_lsu_rot_data" in config.declared_stubs:
+        blocks.append("""module xx_lsu_rot_data (
+  input logic [127:0] data_in, input logic [15:0] rot_sel,
+  output logic [127:0] data_settle_out
+);
+  always_comb data_settle_out = data_in;
+endmodule""")
+    if "xx_lsu_27bit_2stage_ecc_decode" in config.declared_stubs:
+        blocks.append("""module xx_lsu_27bit_2stage_ecc_decode (
+  input logic cpurst_b, input logic [26:0] data_decode,
+  input logic ecc_stage_vld, input logic stage_dp_clk,
+  output logic [21:0] corrected_data, output logic ham_error,
+  output logic parity_error
+);
+  always_comb begin corrected_data = data_decode[21:0]; ham_error = 1'b0; parity_error = 1'b0; end
+endmodule""")
+    if "xx_lsu_35bit_2stage_ecc_decode" in config.declared_stubs:
+        blocks.append("""module xx_lsu_35bit_2stage_ecc_decode (
+  input logic cpurst_b, input logic [34:0] data_decode,
+  input logic ecc_stage_vld, input logic stage_dp_clk,
+  output logic [28:0] corrected_data, output logic ham_error,
+  output logic parity_error
+);
+  always_comb begin corrected_data = data_decode[28:0]; ham_error = 1'b0; parity_error = 1'b0; end
+endmodule""")
+    if "xx_lsu_32bit_ecc_decode" in config.declared_stubs:
+        blocks.append("""module xx_lsu_32bit_ecc_decode (
+  input logic [38:0] data_decode, output logic [31:0] corrected_data,
+  output logic ham_error, output logic parity_error
+);
+  always_comb begin corrected_data = data_decode[31:0]; ham_error = 1'b0; parity_error = 1'b0; end
+endmodule""")
     return "\n\n".join(blocks)
 
 
 def _filelist(config: Environment) -> str:
     defines = (
-        "TDT_MP_HINFO_WIDTH=17", "VL_WIDTH=8", "VSTART_WIDTH=7", "WK_PA_WIDTH=40", "WK_VA_WIDTH=48", "WK_MA_WIDTH=40",
+        "TDT_MP_HINFO_WIDTH=17", "VL_WIDTH=8", "VSTART_WIDTH=7", "WK_PA_WIDTH=40", "WK_PA_WIDTH_40", "WK_VA_WIDTH=48", "WK_MA_WIDTH=40",
         "WK_LS_DCACHE_SINGLE_TAG_WIDTH=26", "WK_LS_DCACHE_SINGLE_LDTAG_WIDTH=27", "WK_LS_DCACHE_DOUBLE_LDTAG_WIDTH=54", "WK_LS_DCACHE_TRIPLE_LDTAG_WIDTH=81", "WK_LS_DCACHE_LDTAG_WIDTH=108",
+        "WK_LS_DCACHE_LDTAG_BF_ECC_LENGTH=22", "WK_LS_DCACHE_LDTAG_DOUBLE_BF_ECC_LENGTH=44", "WK_LS_DCACHE_LDTAG_TRIPLE_BF_ECC_LENGTH=66", "WK_LS_DCACHE_LDTAG_QUADRUPLE_BF_ECC_LENGTH=88",
     )
     lines = [f"+incdir+verif/{config.name}/tb", *(f"+define+{item}" for item in defines), f"verif/{config.name}/tb/{config.name}_deps.sv", *config.production_sources, config.source, f"verif/{config.name}/tb/{config.name}_assertions.sv", f"verif/{config.name}/tb/{config.name}_tb.sv"]
     return "\n".join(lines)

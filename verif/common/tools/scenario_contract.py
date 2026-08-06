@@ -458,6 +458,6 @@ def validate_environment(contract: EnvironmentContract) -> ValidationSummary:
         signal_count=len(contract.known_signals),
         declared_stubs=contract.manifest.declared_stubs,
         stub_results=dict(contract.manifest.stub_results),
-        markdown=contract.manifest.feature_doc,
-        runbook=contract.manifest.runbook,
+        markdown=contract.markdown,
+        runbook=contract.runbook,
     )

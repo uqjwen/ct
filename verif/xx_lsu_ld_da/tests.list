@@ -1,0 +1,12 @@
+tc_da_cache_data
+tc_da_forward_merge
+tc_da_ecc_replay
+tc_da_access_fault
+tc_da_lq_pop
+tc_da_rb_create_merge
+tc_da_completion
+tc_da_data_request
+tc_da_terminal_state
+tc_da_dependency
+tc_da_debug
+tc_da_flush_clock
