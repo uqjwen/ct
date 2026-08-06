@@ -23,6 +23,17 @@ from verif.common.tools.scenario_contract import (
 )
 
 
+APPROVED_ENVIRONMENTS = {
+    "xx_lsu_ld_ag": (12, 96, 8),
+    "xx_lsu_ld_dc": (12, 72, 6),
+    "xx_lsu_ld_da": (12, 72, 6),
+    "xx_lsu_ld_wb": (12, 72, 6),
+    "xx_lsu_rb": (12, 72, 6),
+    "xx_lsu_lrq": (12, 72, 6),
+    "xx_lsu_lfb": (13, 78, 6),
+}
+
+
 def _strip_strings(text: str) -> str:
     return re.sub(r'"(?:\\.|[^"\\])*"', '""', strip_comments(text))
 
@@ -101,12 +112,36 @@ def main() -> int:
     except (ContractError, FileNotFoundError, OSError, ValueError) as error:
         print(f"PREFLIGHT_FAIL: {error}", file=sys.stderr)
         return 1
+    environment_count = len(summaries)
+    feature_count = sum(item.feature_count for item in summaries)
+    scenario_count = sum(item.scenario_count for item in summaries)
     print(
         "LSU_PREFLIGHT_PASS "
-        f"environments={len(summaries)} "
-        f"features={sum(item.feature_count for item in summaries)} "
-        f"scenarios={sum(item.scenario_count for item in summaries)}"
+        f"environments={environment_count} "
+        f"features={feature_count} "
+        f"scenarios={scenario_count}"
     )
+    if args.all:
+        if set(names) != set(APPROVED_ENVIRONMENTS):
+            print(
+                "PREFLIGHT_FAIL: environment set differs from interaction-2.1 approval",
+                file=sys.stderr,
+            )
+            return 1
+        for name, summary in zip(names, summaries):
+            expected_features, expected_scenarios, expected_minimum = APPROVED_ENVIRONMENTS[name]
+            actual = (summary.feature_count, summary.scenario_count, summary.minimum_scenarios)
+            expected = (expected_features, expected_scenarios, expected_minimum)
+            if any(actual[index] < expected[index] for index in range(3)):
+                print(
+                    f"PREFLIGHT_FAIL: {name} below approved minimum: {actual} < {expected}",
+                    file=sys.stderr,
+                )
+                return 1
+        print(
+            "INTERACTION_2_1_PREFLIGHT_PASS "
+            f"environments={environment_count} features={feature_count} scenarios={scenario_count}"
+        )
     return 0
 
 
