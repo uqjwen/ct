@@ -472,8 +472,8 @@ git commit -m "docs: populate CP0 coverage waiver workbook"
 - Create: `docs/interaction-2.2-followup-review.md`
 
 **Interfaces:**
-- Produces report sections: AG conclusion, input/internal/output mapping, CP0 counts, management-field boundary, static evidence, dynamic boundary, and licensed-host commands
-- Consumes checker marker from Task 3
+- Produces report sections: AG conclusion, input/internal/output mapping, CP0 counts, management-field boundary, pane-finalization boundary, static evidence, dynamic boundary, and licensed-host commands
+- Consumes pane-finalizer and checker markers from Task 3
 - Preserves existing interaction 1.6–2.1 test contracts
 
 - [ ] **Step 1: Write the evidence report**
@@ -483,6 +483,7 @@ The report must state:
 ```text
 AG-FP-05-S07 是 DUT 功能点；testbench 通过上游输入形成因果链，三个目标输出均由 DUT 产生。
 CP0_WAIVER_WORKBOOK_PASS code_rows=45 function_rows=0 line=4 branch=5 condition=11 toggle=25 fsm=0。
+CP0_WAIVER_PANES_PASS sheets=2 rows=2；工作簿内容与样式由 Artifact Tool 生成，标准库终结器仅补写两处冻结窗格并证明其他 ZIP payload 字节不变。
 K–P 管理字段按用户确认保持空白；模板示例已清除。
 本机静态测试和工作簿检查不等于 VCS/URG 动态签核，AG 状态仍为 BLOCKED_NO_VCS。
 ```
