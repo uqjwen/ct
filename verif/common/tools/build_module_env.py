@@ -45,6 +45,7 @@ class Environment:
     runbook: str
     clock: str
     reset: str
+    flush: str
     parameters: Mapping[str, object]
     idle_overrides: Mapping[str, object]
     declared_stubs: tuple[str, ...]
@@ -85,6 +86,22 @@ DA_FEATURES = (
 )
 
 
+WB_FEATURES = (
+    Feature("DA/RB completion仲裁", "tc_wb_completion_arb", "CHK_WB_FP01_CMPLT_ARB", "COV_WB_FP01_CMPLT", "P0", ("lda_lwb_ex3_cmplt_req", "rb_lwb_ex3_cmplt_req", "lda_lwb_ex3_cmplt_req_gate"), ("lwb_rb_ex3_cmplt_grnt", "lsu_rtu_ex4_cmplt"), "当 `lda_lwb_ex3_cmplt_req=1` 与 `rb_lwb_ex3_cmplt_req=1` 同拍竞争时", "则completion winner唯一，`lwb_rb_ex3_cmplt_grnt` 仅在RB获胜时为1且loser保持", "固定优先级和持续请求均不会丢失completion"),
+    Feature("DA/WMB/VMB/RB data仲裁", "tc_wb_data_arb", "CHK_WB_FP02_DATA_ARB", "COV_WB_FP02_DATA", "P0", ("lda_lwb_ex3_data_req", "wmb_lwb_data_req", "vmb_lwb_data_req", "rb_lwb_ex3_data_req"), ("lwb_ex4_data_vld", "lwb_rb_ex3_data_grnt", "lwb_wmb_ex3_data_grnt", "ld_wb_vmb_data_grnt"), "当 `lda_lwb_ex3_data_req`、WMB、VMB、RB请求任意组合且至少一个为1时", "则 `lwb_ex4_data_vld=1` 且三个显式grant至多一个，winner payload唯一", "四源互异数据、持续竞争和轮换空闲lane不会丢失"),
+    Feature("req DP gate合同", "tc_wb_req_contract", "CHK_WB_FP03_REQ_DP_GATE", "COV_WB_FP03_REQ", "P0", ("lda_lwb_ex3_data_req", "lda_lwb_ex3_data_req_dp", "lda_lwb_ex3_data_req_gateclk_en"), ("lwb_ex4_data_vld", "lwb_ex4_inst_vld"), "当 `lda_lwb_ex3_data_req=1` 时必须同时满足DP和gate合同", "则req=1蕴含DP=1和gate=1；DP-only只可预开数据路径且 `lwb_ex4_data_vld=0`", "req-only、DP-only、gate-only及全部有效四种组合均覆盖"),
+    Feature("scalar PREG格式化", "tc_wb_scalar", "CHK_WB_FP04_SCALAR", "COV_WB_FP04_SCALAR", "P0", ("lda_lwb_ex3_data_req", "lda_ex3_preg", "lda_lwb_ex3_data", "lda_lwb_ex3_preg_sign_sel"), ("lsu_idu_ex4_preg_vld", "lsu_idu_ex4_preg", "lsu_idu_ex4_preg_data"), "当scalar `lda_lwb_ex3_data_req=1` 被仲裁接受时", "则 `lsu_idu_ex4_preg_vld=1` 且PREG、符号扩展数据属于同一DA owner", "byte/half/word/dword和正负符号边界逐bit检查"),
+    Feature("vector VR0/VR1/FR格式化", "tc_wb_vector", "CHK_WB_FP05_VECTOR", "COV_WB_FP05_VECTOR", "P0", ("lda_lwb_ex3_data_req", "lda_ex3_inst_vfls", "lda_ex3_vreg", "lda_lwb_ex3_vreg_sign_sel"), ("lsu_idu_ex4_vreg_vld", "lsu_idu_ex4_vreg_vr0_data", "lsu_idu_ex4_vreg_vr1_data", "lsu_idu_ex4_vreg_fr_data"), "当vector或FP `lda_lwb_ex3_data_req=1` 被接受时", "则VR0、VR1、FR中只有适用通道valid且 `lsu_idu_ex4_vreg_vld=1`", "vmew、split、FR/VR选择和互异数据花纹全部覆盖"),
+    Feature("RTU completion与exception", "tc_wb_rtu", "CHK_WB_FP06_RTU", "COV_WB_FP06_RTU", "P0", ("lda_lwb_ex3_cmplt_req", "lda_ex3_iid", "lda_lwb_ex3_expt_vld"), ("lsu_rtu_ex4_cmplt", "lsu_rtu_ex4_iid", "lsu_rtu_ex4_expt_vld"), "当 `lda_lwb_ex3_cmplt_req=1` 携带IID和异常元数据时", "则 `lsu_rtu_ex4_cmplt=1`、IID精确匹配且exception只对异常owner有效", "completion每个owner一次且异常/正常元数据互斥"),
+    Feature("bus error数据抑制", "tc_wb_bus_error", "CHK_WB_FP07_BUS_ERROR", "COV_WB_FP07_BUS_ERROR", "P0", ("rb_lwb_ex3_data_req", "rb_lwb_ex3_bus_err", "rb_lwb_ex3_bus_err_addr"), ("lsu_rtu_async_expt_vld", "lsu_rtu_async_expt_addr", "lsu_idu_ex4_preg_vld"), "当 `rb_lwb_ex3_bus_err=1` 随RB data request到达时", "则 `lsu_rtu_async_expt_vld=1` 且地址匹配，同时正常 `lsu_idu_ex4_preg_vld=0`", "错误数据零次进入架构寄存器"),
+    Feature("VMB completion与merge", "tc_wb_vmb", "CHK_WB_FP08_VMB", "COV_WB_FP08_VMB", "P0", ("vmb_lwb_data_req", "vmb_lwb_vmb_merge_vld", "vmb_lwb_vreg", "vmb_lwb_data"), ("ld_wb_vmb_data_grnt", "ld_wb_vmb_data_merge_vld", "ld_wb_vmb_data_vmb_id", "ld_wb_vmb_cmplt_vld"), "当 `vmb_lwb_data_req=1` 或VMB completion被接受时", "则 `ld_wb_vmb_data_grnt`、merge、VMB ID和FOF/completion元数据来自同一owner", "merge/non-merge与data/completion交叉无ID串项"),
+    Feature("debug halt-info自清", "tc_wb_debug", "CHK_WB_FP09_DEBUG", "COV_WB_FP09_DEBUG", "P1", ("rb_lwb_ex3_data_req", "rb_ld_wb_data_check", "rb_ld_wb_data_halt_info"), ("rb_entry_data_halt_info_update_vld", "lsu_dtu_data_vld", "lsu_dtu_data_halt_info"), "当 `rb_ld_wb_data_check=1` 随RB owner进入WB时", "则 `rb_entry_data_halt_info_update_vld` 只命中该entry且debug data valid为单拍", "更新后自清，下一owner不会继承旧halt-info"),
+    Feature("EX4 forward winner", "tc_wb_forward", "CHK_WB_FP10_FORWARD", "COV_WB_FP10_FORWARD", "P1", ("lda_lwb_ex3_data_req", "wmb_lwb_data_req", "vmb_lwb_data_req", "rb_lwb_ex3_data_req"), ("lsu_idu_ex4_fwd_vreg_vld", "lsu_idu_ex4_fwd_vreg", "lwb_ex4_data_vld"), "当 `lda_lwb_ex3_data_req=1` 或其他data source赢得WB仲裁且目标为vector时", "则 `lsu_idu_ex4_fwd_vreg_vld=1` 且forward寄存器只来自实际winner", "loser payload变化不得影响EX4 bypass"),
+    Feature("check flush取消年轻owner", "tc_wb_flush", "CHK_WB_FP11_FLUSH", "COV_WB_FP11_FLUSH", "P0", ("lda_lwb_ex3_cmplt_req", "rtu_ck_flush", "rtu_ck_flush_iid", "lda_ex3_iid"), ("lwb_ex4_inst_vld", "lsu_rtu_ex4_cmplt", "lwb_ex4_data_vld"), "当 `rtu_ck_flush=1` 且flush IID年龄命中当前owner时", "则 `lwb_ex4_inst_vld=0`、completion/data valid均不产生；未命中owner保留", "IID wrap和full/check flush边界均覆盖"),
+    Feature("completion/data clock reset", "tc_wb_clock_reset", "CHK_WB_FP12_CLOCK_RESET", "COV_WB_FP12_CLOCK", "P1", ("lda_lwb_ex3_data_req", "cp0_lsu_icg_en", "pad_yy_icg_scan_en"), ("lwb_ex4_data_vld", "lwb_ex4_inst_vld"), "当 `cp0_lsu_icg_en=0`、scan=1且合法请求到达时", "则scan允许捕获，reset低时 `lwb_ex4_data_vld=0` 且所有架构valid为0", "ICG on/off/scan和reset释放首拍无幽灵写回"),
+)
+
+
 CONFIGS = {
     "xx_lsu_ld_dc": Environment(
         name="xx_lsu_ld_dc",
@@ -94,6 +111,7 @@ CONFIGS = {
         runbook="doc-dc/xx_lsu_ld_dc_vcs_verification.md",
         clock="forever_cpuclk",
         reset="cpurst_b",
+        flush="rtu_lsu_flush_fe",
         parameters={"VB_DATA_ENTRY": 3, "LQENTRY": 48, "LSIQENTRY": 12, "VMBENTRY": 8, "PC_LEN": 15, "IID_WIDTH": 7, "VREG": 6, "PREG": 7},
         idle_overrides={"ctrl_ld_clk": None, "cp0_lsu_icg_en": "1'b1", "cp0_lsu_dcache_en": "1'b1", "lsu_dcache_ld_xx_gwen": "'1"},
         declared_stubs=("gated_clk_cell", "xx_lsu_compare_iid"),
@@ -108,12 +126,29 @@ CONFIGS = {
         runbook="doc-da/xx_lsu_ld_da_vcs_verification.md",
         clock="forever_cpuclk",
         reset="cpurst_b",
+        flush="rtu_lsu_flush_fe",
         parameters={"VB_DATA_ENTRY": 3, "LQENTRY": 48, "LSIQENTRY": 12, "SQ_ENTRY": 12, "WMB_ENTRY": 8, "VMB_ENTRY": 8, "PC_LEN": 15, "IID_WIDTH": 7, "VREG": 6, "PREG": 7},
         idle_overrides={"ctrl_ld_clk": None, "lsu_special_clk": None, "cp0_lsu_icg_en": "1'b1", "cp0_lsu_dcache_en": "1'b1", "cp0_lsu_ecc_en": "1'b1"},
         declared_stubs=("gated_clk_cell", "xx_lsu_compare_iid", "xx_lsu_rot_data", "xx_lsu_27bit_2stage_ecc_decode", "xx_lsu_32bit_ecc_decode", "xx_lsu_35bit_2stage_ecc_decode"),
         production_sources=(),
         features=DA_FEATURES,
         doc_tokens=("- 四块互异数据用于验证data0/data1/data2/data3不串区。", "- completion、RB create、LQ pop、restart必须形成唯一终态。"),
+    ),
+    "xx_lsu_ld_wb": Environment(
+        name="xx_lsu_ld_wb",
+        prefix="WB",
+        source="srcs/xx_lsu_ld_wb.sv",
+        feature_doc="doc-wb/xx_lsu_ld_wb_feature_test_plan.md",
+        runbook="doc-wb/xx_lsu_ld_wb_vcs_verification.md",
+        clock="forever_cpuclk",
+        reset="cpurst_b",
+        flush="rtu_yy_xx_flush",
+        parameters={"RBENTRY": 16, "SQ_ENTRY": 12, "VMB_ENTRY": 8, "IID_WIDTH": 7, "VREG": 6, "PREG": 7, "PREG_N": 96},
+        idle_overrides={"ctrl_ld_clk": None, "cp0_lsu_icg_en": "1'b1"},
+        declared_stubs=("gated_clk_cell", "xx_lsu_compare_iid"),
+        production_sources=(),
+        features=WB_FEATURES,
+        doc_tokens=("- 请求蕴含链：req=1 时必须 DP=1 且 gate=1；DP-only只允许预开数据路径。", "- 持续请求可在任意空闲lane获得服务，完成和数据不会丢失。"),
     ),
 }
 
@@ -159,12 +194,13 @@ def _scenario_variants(config: Environment, index: int, feature: Feature) -> lis
     common_observe = {
         "DC": "ldc_lda_ex2_inst_vld",
         "DA": "lda_ex3_inst_vld",
+        "WB": "lwb_ex4_inst_vld",
     }.get(config.prefix, primary_observe)
     templates = (
         ("名义accept", "复位释放、无flush且所有非目标输入idle", feature.drive, "C0: 驱动名义输入；C1: 采样目标输出", feature.trigger, feature.observe, feature.expected, feature.closure),
         ("连续两拍保持", "先建立同一owner并施加两拍合法反压", feature.drive, "C0: 建立owner；C1: 首次采样；C2: 保持输入再次采样", f"当 `{primary_drive}=1` 且同一owner连续保持两拍时", feature.observe, f"则 C1至C2 `{primary_observe}` 保持二态且只归属于同一owner", "两拍保持期间payload hash和owner均不漂移"),
         ("竞争与优先级", "目标请求与次级来源同拍，二者payload使用互异花纹", feature.drive, "C0: 同拍驱动竞争来源；C1: 采样winner；C2: 检查loser未被消费", f"当 `{primary_drive}=1` 与同级竞争条件同拍成立时", feature.observe, f"则 C1 `{primary_observe}` 只反映文档定义的winner且不含X", "winner唯一，loser payload零次误消费"),
-        ("full flush交叉", "先建立live owner，再在转移边界施加full flush", tuple(dict.fromkeys((*feature.drive, "rtu_lsu_flush_fe"))), "C0: 建立owner；C1: full flush=1；C2: 撤销后采样", f"当 `{primary_drive}=1` 与 `rtu_lsu_flush_fe=1` 在owner窗口交叉时", tuple(dict.fromkeys((*feature.observe, common_observe))), f"则 C2 `{common_observe}=0` 且 `{primary_observe}` 不得产生被flush owner的新副作用", "flush后的completion/create/forward计数均不增加"),
+        ("full flush交叉", "先建立live owner，再在转移边界施加full flush", tuple(dict.fromkeys((*feature.drive, config.flush))), "C0: 建立owner；C1: full flush=1；C2: 撤销后采样", f"当 `{primary_drive}=1` 与 `{config.flush}=1` 在owner窗口交叉时", tuple(dict.fromkeys((*feature.observe, common_observe))), f"则 C2 `{common_observe}=0` 且 `{primary_observe}` 不得产生被flush owner的新副作用", "flush后的completion/create/forward计数均不增加"),
         ("边界和延迟响应", "目标字段取全零、全一和边界花纹，响应分别延迟0/1/N拍", feature.drive, "C0: 驱动边界花纹；C1: 0拍采样；C2: 1拍采样；C3: N拍后采样", f"当 `{primary_drive}=1` 且目标payload取边界值时", feature.observe, f"则 C1至C3 `{primary_observe}` 仅在所属accept窗口有效且 `$isunknown({primary_observe})=0`", "0/1/N延迟与零/最大值交叉全部命中"),
         ("owner立即复用", "完成owner A后下一合法拍复用资源给互异owner B", tuple(dict.fromkeys((*feature.drive, "lag0_ex1_iid"))) if config.prefix == "DC" else feature.drive, "C0: 驱动owner A；C1: accept；C2: 驱动owner B；C3: 采样", f"当 `{primary_drive}=1` 的资源在下一合法拍被新owner复用时", feature.observe, f"则 C3 `{primary_observe}` 只对应owner B，旧owner不得迟到修改", "scoreboard generation递增且旧响应零次命中新owner"),
     )

@@ -1,0 +1,12 @@
+tc_wb_completion_arb
+tc_wb_data_arb
+tc_wb_req_contract
+tc_wb_scalar
+tc_wb_vector
+tc_wb_rtu
+tc_wb_bus_error
+tc_wb_vmb
+tc_wb_debug
+tc_wb_forward
+tc_wb_flush
+tc_wb_clock_reset

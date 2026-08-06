@@ -1,0 +1,34 @@
+{
+  "env_name": "xx_lsu_ld_wb",
+  "dut_module": "xx_lsu_ld_wb",
+  "dut_source": "srcs/xx_lsu_ld_wb.sv",
+  "feature_doc": "doc-wb/xx_lsu_ld_wb_feature_test_plan.md",
+  "runbook": "doc-wb/xx_lsu_ld_wb_vcs_verification.md",
+  "feature_prefix": "WB",
+  "expected_features": 12,
+  "min_scenarios_per_feature": 6,
+  "clock": "forever_cpuclk",
+  "reset": "cpurst_b",
+  "parameters": {
+    "RBENTRY": 16,
+    "SQ_ENTRY": 12,
+    "VMB_ENTRY": 8,
+    "IID_WIDTH": 7,
+    "VREG": 6,
+    "PREG": 7,
+    "PREG_N": 96
+  },
+  "idle_overrides": {
+    "ctrl_ld_clk": null,
+    "cp0_lsu_icg_en": "1'b1"
+  },
+  "production_sources": [],
+  "declared_stubs": [
+    "gated_clk_cell",
+    "xx_lsu_compare_iid"
+  ],
+  "stub_results": {
+    "gated_clk_cell": "PENDING_FULL_CHIP",
+    "xx_lsu_compare_iid": "PENDING_FULL_CHIP"
+  }
+}
