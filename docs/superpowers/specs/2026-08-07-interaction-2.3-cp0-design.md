@@ -75,7 +75,7 @@
 
 - 基础源映射：MEI/MTI/MSI 来自 BIU，SEI/STI 与软件/AIA pending 合并，SSI 经 `mvssip` 保存，code 13 来自 HPCP，code 23 来自 ECC fatal 状态；
 - `MIE/SIE` 提供局部使能，`mstatus.MIE/sstatus.SIE` 结合当前特权级控制是否可达；
-- `mideleg` 同时参与 S 类和主要中断的目标选择；
+- `mideleg` 同时参与 S 类和主要中断的 request 选择；trap 目标由返回 cause 经 `vec_num` 与 `mideleg_value[18:0]` 再分类，不能把 request 槽直接当 trap 目标；
 - `int_sel[14:0]` 有 15 个优先级槽位，其中两个槽位硬连 0，IUI `casez` 从 bit 14 到 bit 0 固定优先级；
 - `cp0_rtu_xx_int_b` 与 `cp0_lsu_xx_int_b` 为寄存后的低有效请求，`cp0_rtu_xx_vec` 为 5 bit cause；
 - `rtu_cp0_int_ack` 目前只有端口/连线，没有参与 CP0 内部清 pending 或请求撤销；外部电平源必须由源端撤销，软件 pending 由 CSR 规则处理。
@@ -85,7 +85,7 @@
 - IUI 对 CSR 地址、特权级、只读写、FS/VS/TW/TVM/TSR 及 AIA 非法条件进行资格检查；失败路径向 IU 送 illegal-instruction cause 2 和 32 bit opcode `mtval`；
 - 其余系统异常/中断已经由 RTU 分类后，以 `rtu_yy_xx_expt_vec[5:0]`、`rtu_cp0_epc`、`rtu_cp0_expt_mtval` 和有效信号送入 CP0；CP0 不重新决定上游异常优先级；
 - bit 5 表示 interrupt，低 5 bit 表示 cause；
-- M 模式不委托。S/U 模式下，异常使用 `medeleg`、中断使用 `mideleg`；
+- M 模式不委托。S/U 模式下，异常使用 `medeleg`、中断 trap 使用 `vec_num[18:0] & mideleg_value[18:0]`；MCIP request 可由 `mideleg_value[23]` 选入委托槽，但 cause 23 无 `vec_num` 行，所以 RTU 回送 cause 23 后实际分类为 M trap；
 - trap 到 M 时更新 MPP/MPIE/MIE、MEPC/MCAUSE/MTVAL 和当前特权级；trap 到 S 时更新 SPP/SPIE/SIE、SEPC/SCAUSE/STVAL 和当前特权级；
 - MRET/SRET 恢复当前特权级和全局使能，并输出半字地址形式的返回 PC；
 - 向量地址由 `cp0_ifu_vbr` 输出当前目标特权级的 `mtvec/stvec` 值，CP0 内部没有形成 `BASE + 4*cause` 的完整地址，因此向量偏移属于下游合同。
@@ -126,10 +126,12 @@ source -> pending -> local enable -> privilege/global gate
 - 八类中断源的赋值可解析；
 - IUI 优先级 case 有 15 槽位、两个不可达槽位和 13 个有效槽位，cause 顺序与 RTL 基线一致；
 - 实际可委托异常集合由 `vec_num` 解码和 `edeleg` 可写掩码交集得到；
-- `rtu_cp0_int_ack` 在去除注释和声明后没有内部消费者；
-- WFI、M/S trap CSR 和 xRET 的关键状态更新块存在。
+- `rtu_cp0_int_ack` 在 `wk_cp0_regs` module body 中没有语义消费者；扫描忽略注释、字符串和无初始化声明，但必须识别 `wire/reg` 声明赋值及独立赋值中的引用；
+- 以结构化 JSON 固化 MCIP cause23 的 request-side delegated=true、trap-side delegated=false；
+- `key_paths` 必须精确包含五个预期键且均为 true；WFI 路径必须同时包含四个 `lpmd_ack` 输入和四个 wake 输入；
+- 无效 CLI 参数也必须只输出单行 `CP0_CONTRACT_FAIL:` 并非零退出。
 
-测试不检查中文句子或文档固定措辞。测试直接运行工具，并通过临时复制/最小变异验证错误的优先级 cause、缺失子模块和新增 ack 消费者会被拒绝。每个变异对应“设计文档已陈旧却仍被判定有效”这一具体故障。
+测试不检查中文句子或文档固定措辞。测试直接运行工具，并通过临时复制/最小变异验证错误的优先级 cause、缺失子模块、ACK 独立赋值/声明赋值消费者、MCIP request/trap 委托结构漂移，以及 WFI BIU ack/debug wake 缺失会被拒绝；注释/字符串不被误报。每个变异对应“设计文档已陈旧却仍被判定有效”这一具体故障。
 
 ## 8. 源码观察到的待确认项
 
@@ -141,7 +143,7 @@ source -> pending -> local enable -> privilege/global gate
 4. `medeleg` 写掩码允许 bit 0，但 `vec_num` case 未对 cause 0 生成 one-hot，因此 cause 0 实际不委托；
 5. `mtvec/stvec` 保存两位 mode，却只读出 mode[0] 并把 bit 1 强制为 0；非法 mode 的 WARL 语义需按实现验证；
 6. `rtu_cp0_expt_vld` 与 `rtu_yy_xx_expt_vld` 分别控制 trap CSR/状态栈和当前特权级更新，两个有效信号的周期一致性属于 RTU-CP0 接口合同；
-7. `ADD_AIA` 只条件编译 IMSIC 接口与部分 CSR 地址资格，主要中断数组仍依赖仓库外提供的 `WK_MAJOR_*` 宏；本仓库四个 CP0 文件不能独立证明两种配置均可编译；
+7. AIA/major-interrupt 集成项：`ADD_AIA` 只条件编译 IMSIC 接口与部分 CSR 地址资格，主要中断数组仍依赖仓库外提供的 `WK_MAJOR_*` 宏；同时 MCIP request 侧可用 `mideleg_value[23]` 选择委托槽，但 trap 侧因 `vec_num` 无 cause23 而分类为 M；需确认两种配置的宏/filelist/功能闭合及该 request/trap 目标不一致是否为系统预期；
 8. `cp0_ifu_vbr` 只携带 base 和 mode 低位，向量偏移计算没有出现在本次 CP0 RTL 中；
 9. 外部端口 `biu_cp0_ss_int` 被置位保存到 `mvssip`，清除依赖 CSR 路径而不是输入回落，需验证软件清除和重复置位。
 

@@ -13,21 +13,22 @@
 |检查|命令|本次结果|
 |---|---|---|
 |CP0 静态合同|`python3 tools/check_interaction_2_3_cp0_contract.py`|`CP0_CONTRACT_PASS modules=4 submodules=3 interrupt_sources=8 priority_slots=15 live_slots=13 delegable_exceptions=12 ack_consumers=0`|
-|CP0 单元/变异测试|`python3 -m unittest tests.test_interaction_2_3_cp0_contract -v`|6 tests，0 failures，`OK`|
-|全仓 Python 单元测试|`python3 -m unittest discover -s tests -v`|83 tests，0 failures，`OK`|
+|CP0 单元/变异测试|`python3 -m unittest tests.test_interaction_2_3_cp0_contract -v`|13 tests，0 failures，`OK`；覆盖 MCIP 两侧、ACK 声明赋值/非消费者、CLI 与 WFI 定向变异。|
+|全仓 Python 单元测试|`python3 -m unittest discover -s tests -v`|90 tests，0 failures，`OK`|
 |既有 LSU preflight|`make -C verif/common preflight`|7 environments、85 features、534 scenarios；`LSU_PREFLIGHT_PASS` 与 `INTERACTION_2_1_PREFLIGHT_PASS`|
-|历史 Task 3 whitespace 覆盖|`git diff --check 74d5cc8..4e727930293c00d32c50b70372aabee9274e5773`|exit 0，无输出；覆盖前一 Task 3 报告提交相对其父提交的 diff|
-|第一轮证据修订 whitespace 覆盖|`git diff --check 4e727930293c00d32c50b70372aabee9274e5773..fac816e2dd7dc0412606ca48ee5c37e947b0b328`|exit 0，无输出；覆盖第一轮 evidence-fix 的不可变已提交范围|
+|全交付 whitespace 覆盖|`git diff --check 473b3c23794a7841f3c31fc667a4964fda9a28d4..HEAD`|最终提交后 exit 0、无输出；覆盖基线至最终 HEAD 的不可变已提交范围|
 |生产范围|`git diff 473b3c2...HEAD -- cp0 srcs README.md`|exit 0，无输出（0 个 CP0/`srcs`/README 变更）|
 |分支状态（创建本报告前）|`git status --short --branch`|`## review/interaction-2.3-v1`；clean baseline，无工作树条目|
 
-合同 marker 证明检查器从当前四个 RTL 文件抽取并核对四模块/三子模块拓扑、八类中断源、15 个优先级槽（13 live）和 12 个有效异常委托 cause。对 `ack_consumers=0`，其证明范围更窄：检查器只在已解析的 `wk_cp0_regs` module body 中去除声明后，计数 `rtu_cp0_int_ack` 标识符出现次数为 0；它本身不证明四个文件中语义上没有消费者，也不证明顶层连通性。任何更广的“无消费者”观察仅是人工静态检查，仍须由系统集成和动态测试确认。它不证明外部宏、完整 CP0 filelist、上游/下游接口时序或动态行为。
+合同 marker 证明检查器从当前四个 RTL 文件抽取并核对四模块/三子模块拓扑、八类中断源、15 个优先级槽（13 live）和 12 个有效异常委托 cause；JSON 还固定精确五项 `key_paths`，并给出结构事实 `mcip_delegation={cause:23, request_selects_supervisor:true, trap_classifies_supervisor:false}`。这意味着 MCIP 可由 `mideleg_value[23]` 进入 delegated request 槽，但 RTU 回送 cause23 时因 `vec_num` 没有该行而由 `mideleg_vld` 分类为 M trap。
+
+对 `ack_consumers=0`，证明范围仍很窄：检查器只扫描已解析的 `wk_cp0_regs` module body，忽略注释、字符串文本和无初始化声明，同时保留 `wire/reg ... = rtu_cp0_int_ack` 初始化右值和独立语句中的引用。它不证明另外三个文件没有语义消费者，也不证明顶层连通性；更广观察仍须由系统集成和动态测试确认。marker/JSON 也不证明外部宏、完整 CP0 filelist、上游/下游接口时序或动态行为。
 
 本报告的后续微小文字修订不把尚未产生的自身提交 SHA 写入历史证据；每个新 HEAD 的 whitespace 由最终分支控制器执行 revision-range 检查，以避免自引用循环。
 
 ## 链接和源码锚点审计
 
-对详细设计与本报告执行只读的 Python 标准库 Markdown-link 审计：逐个解析 `[]()` 中的仓库相对目标，并以仓库根目录归一化后检查存在性。详细设计有 0 个 Markdown 链接；本报告有 5 个，均解析到现存仓库文件（5/5）。
+对详细设计与本报告执行只读的 Python 标准库 Markdown-link 审计：逐个解析 `[]()` 中的仓库相对目标，并以仓库根目录归一化后检查存在性；每篇文档都必须至少含一个仓库相对链接，避免空集合误过。详细设计有 22 个、本报告有 5 个，合计 27/27 解析到现存仓库文件。
 
 同时对详细设计每个一级章节至少抽样一个已列出的 RTL 锚点，并以当前文件行号读取：§1 `wk_cp0_top.v:1042`、§2 `wk_cp0_iui.v:1406`、§3 `wk_cp0_regs.v:2646`、§4 `wk_cp0_regs.v:2144`、§5 `wk_cp0_lpmd.v:161`、§6 `wk_cp0_iui.v:2004`、§7 `wk_cp0_regs.v:3207`、§8 `wk_cp0_regs.v:5597`。8/8 样本均在当前文件范围内且为非空 RTL 行；此审计只确认定位与源码可读，不能替代语义仿真。
 
@@ -45,6 +46,7 @@ documents = [
 ]
 links = []
 for document in documents:
+    document_links = []
     for target in re.findall(r'(?<!!)\[[^\]]*\]\(([^)]+)\)', document.read_text(encoding='utf-8')):
         target = target.strip().split(maxsplit=1)[0].strip('<>')
         if '://' in target or target.startswith('#'):
@@ -52,7 +54,10 @@ for document in documents:
         resolved = (document.parent / target).resolve()
         if (root not in resolved.parents and resolved != root) or not resolved.exists():
             raise SystemExit(f'LINK_AUDIT_FAIL {document.relative_to(root)}:{target}')
-        links.append((document, target))
+        document_links.append(target)
+    if not document_links:
+        raise SystemExit(f'LINK_AUDIT_FAIL {document.relative_to(root)}:no repository-relative links')
+    links.extend((document, target) for target in document_links)
 anchors = [
     ('section1', 'cp0/wk_cp0_top.v', 1042),
     ('section2', 'cp0/wk_cp0_iui.v', 1406),
@@ -82,7 +87,7 @@ PY
 4. `medeleg` 的 bit 0 可写而 cause 0 无 one-hot decode，cause 0 不委托是否符合预期。
 5. `mtvec/stvec` 的 mode[1] 在 CSR readback/VBR 被清零，非法 vector-mode 的 WARL 可见行为。
 6. `rtu_cp0_expt_vld` 与 `rtu_yy_xx_expt_vld` 控制不同状态，dual-valid 周期一致性。
-7. `ADD_AIA`、IMSIC 与仓库外 `WK_MAJOR_*` 宏的 filelist/configuration/function closure。
+7. AIA/major-interrupt 集成：`ADD_AIA`、IMSIC 与仓库外 `WK_MAJOR_*` 宏的 filelist/configuration/function closure；同时确认 MCIP request 侧可走 delegated slot5、而 returned cause23 trap 侧固定分类 M 的不一致是否为系统预期并动态覆盖。
 8. `cp0_ifu_vbr` 仅给 base/mode，IFU/下游 vector offset、对齐和采样时刻。
 9. `biu_cp0_ss_int` 置位后的 `mvssip` sticky 行为，软件清除、重复置位和输入回落协议。
 
@@ -92,5 +97,5 @@ PY
 |---|---|
 |[详细设计](../doc-cp0/wk_cp0_system_interrupt_exception_detailed_design.md)|实现路径、验证合同、9 项集成问题和 RTL 锚点。|
 |[静态检查器](../tools/check_interaction_2_3_cp0_contract.py)|从四个权威 CP0 RTL 文件提取并核对机械合同。|
-|[检查器测试](../tests/test_interaction_2_3_cp0_contract.py)|真实 RTL 正例与 priority/topology/ack/source 变异拒绝。|
+|[检查器测试](../tests/test_interaction_2_3_cp0_contract.py)|真实 RTL 正例与 priority/topology/MCIP/ACK/WFI/CLI 定向变异拒绝。|
 |[README](../README.md)|Interaction 2.3 的原始交付入口。|

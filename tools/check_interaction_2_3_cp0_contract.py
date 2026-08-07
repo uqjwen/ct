@@ -46,11 +46,26 @@ EXPECTED_SELECTORS = [
     "0000000001?????", "00000000001????", "000000000001???",
     "0000000000001??", "00000000000001?", "000000000000001",
 ]
-CHECKED_ASSIGNMENTS = frozenset({*EXPECTED_SOURCES, "int_sel", "edeleg_upd_val"})
+CHECKED_ASSIGNMENTS = frozenset(
+    {
+        *EXPECTED_SOURCES,
+        "int_sel",
+        "edeleg_upd_val",
+        "mcip_deleg_vld",
+        "mideleg_vld",
+    }
+)
 
 
 class ContractError(ValueError):
     """An RTL contract value could not be parsed or differs from the contract."""
+
+
+class ContractArgumentParser(argparse.ArgumentParser):
+    """Route argparse failures through the checker's one-line error contract."""
+
+    def error(self, message: str) -> None:
+        raise ContractError(f"invalid arguments: {message}")
 
 
 def _strip_comments(source: str) -> str:
@@ -225,13 +240,41 @@ def _module_body(source: str, module: str) -> str:
 
 def _ack_consumers(regs: str) -> int:
     body = _module_body(regs, "wk_cp0_regs")
-    body_without_declarations = re.sub(
-        r"\b(?:input|output|wire|reg)\b[^;]*;", "", body, flags=re.DOTALL
-    )
-    consumers = len(re.findall(r"\brtu_cp0_int_ack\b", body_without_declarations))
+    body_without_strings = re.sub(r'"(?:\\.|[^"\\])*"', '""', body)
+    consumers = 0
+    for statement in body_without_strings.split(";"):
+        if re.match(r"\s*(?:input|output|inout|wire|reg|logic)\b", statement):
+            if "=" not in statement:
+                continue
+            statement = statement.split("=", 1)[1]
+        consumers += len(re.findall(r"\brtu_cp0_int_ack\b", statement))
     if consumers:
         raise ContractError(f"ack-consumer count differs: {consumers}")
     return consumers
+
+
+def _mcip_delegation(assignments: dict[str, str]) -> dict[str, object]:
+    request_expression = assignments.get("mcip_deleg_vld", "")
+    trap_expression = assignments.get("mideleg_vld", "")
+    expected_request = re.fullmatch(
+        r"\(pm\[1:0\] == 2'b01 && sie_bit \|\| pm\[1:0\] == 2'b00\) "
+        r"&& mcip_en && mideleg_value\[23\]",
+        request_expression,
+    )
+    expected_trap = (
+        "(pm[1] == 1'b0) && rtu_yy_xx_expt_vec[5] "
+        "&& |(vec_num[18:0] & mideleg_value[18:0])"
+    )
+    if expected_request is None or trap_expression != expected_trap:
+        raise ContractError(
+            "MCIP delegation differs: "
+            f"request={request_expression!r} trap={trap_expression!r}"
+        )
+    return {
+        "cause": 23,
+        "request_selects_supervisor": True,
+        "trap_classifies_supervisor": False,
+    }
 
 
 def _require(source: str, label: str, *patterns: str) -> bool:
@@ -279,7 +322,12 @@ def _key_paths(iui: str, regs: str, lpmd: str) -> dict[str, bool]:
             r"assign\s+cp0_ifu_no_op_req\s*=\s*lpmd_in_wait_state\s*;",
             r"assign\s+cp0_lsu_no_op_req\s*=\s*lpmd_in_wait_state\s*;",
             r"assign\s+cp0_mmu_no_op_req\s*=\s*lpmd_in_wait_state\s*;",
-            r"biu_cp0_int_wakeup\s*\|\|.*?biu_cp0_event_wakeup\s*\|\|\s*dtu_cp0_wake_up\s*\)\s*lpmd_b",
+            r"assign\s+lpmd_ack\s*=\s*lpmd_in_wait_state\s*"
+            r"&&\s*ifu_yy_xx_no_op\s*&&\s*lsu_yy_xx_no_op\s*"
+            r"&&\s*biu_yy_xx_no_op\s*&&\s*mmu_yy_xx_no_op\s*;",
+            r"else\s+if\s*\(\s*biu_cp0_int_wakeup\s*\|\|\s*rtu_yy_xx_dbgon\s*"
+            r"\|\|\s*biu_cp0_event_wakeup\s*\|\|\s*dtu_cp0_wake_up\s*\)\s*"
+            r"lpmd_b\s*\[\s*1\s*:\s*0\s*\]\s*<=\s*2\s*'\s*b\s*11\s*;",
         ),
     }
 
@@ -302,6 +350,7 @@ def check_contract(root: Path = ROOT) -> dict[str, object]:
         "interrupt_sources": interrupt_sources,
         "interrupt_priority": {"selectors": selectors, "causes": causes, "live": live},
         "delegable_exceptions": _delegable_exceptions(sources["wk_cp0_regs"], assignments),
+        "mcip_delegation": _mcip_delegation(assignments),
         "ack_consumers": _ack_consumers(sources["wk_cp0_regs"]),
         "key_paths": _key_paths(
             sources["wk_cp0_iui"], sources["wk_cp0_regs"], sources["wk_cp0_lpmd"]
@@ -310,11 +359,11 @@ def check_contract(root: Path = ROOT) -> dict[str, object]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = ContractArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--json", action="store_true")
-    arguments = parser.parse_args(argv)
     try:
+        arguments = parser.parse_args(argv)
         result = check_contract(arguments.root)
     except (ContractError, OSError, UnicodeError) as error:
         print(f"CP0_CONTRACT_FAIL: {error}", file=sys.stderr)

@@ -79,8 +79,25 @@ class Interaction23Cp0ContractTests(unittest.TestCase):
             [1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 13, 15],
             payload["delegable_exceptions"],
         )
+        self.assertEqual(
+            {
+                "cause": 23,
+                "request_selects_supervisor": True,
+                "trap_classifies_supervisor": False,
+            },
+            payload.get("mcip_delegation"),
+        )
         self.assertEqual(0, payload["ack_consumers"])
-        self.assertTrue(all(payload["key_paths"].values()))
+        self.assertEqual(
+            {
+                "iui_illegal_cause_mtval": True,
+                "machine_trap_csr_update": True,
+                "supervisor_trap_csr_update": True,
+                "mret_sret_return_pc": True,
+                "wfi_noop_wakeup_fsm": True,
+            },
+            payload["key_paths"],
+        )
 
     def test_rejects_interrupt_priority_cause_drift(self) -> None:
         temporary, root = self.temporary_cp0_root()
@@ -159,6 +176,127 @@ class Interaction23Cp0ContractTests(unittest.TestCase):
 
         self.assertNotEqual(0, completed.returncode)
         self.assertIn("ack-consumer", completed.stderr.lower())
+
+    def test_rejects_interrupt_ack_consumer_in_declaration_assignment(self) -> None:
+        for declaration in ("wire", "reg"):
+            with self.subTest(declaration=declaration):
+                temporary, root = self.temporary_cp0_root()
+                with temporary:
+                    regs = root / "cp0/wk_cp0_regs.v"
+                    contents = regs.read_text(encoding="utf-8")
+                    self.assertIn("endmodule", contents)
+                    regs.write_text(
+                        contents.rsplit("endmodule", 1)[0]
+                        + f"{declaration} contract_drift_ack_consumer = "
+                        "rtu_cp0_int_ack;\nendmodule"
+                        + contents.rsplit("endmodule", 1)[1],
+                        encoding="utf-8",
+                    )
+
+                    completed = self.run_checker("--root", str(root))
+
+                self.assertNotEqual(0, completed.returncode)
+                self.assertIn("ack-consumer", completed.stderr.lower())
+
+    def test_ignores_interrupt_ack_in_comments_and_string_text(self) -> None:
+        temporary, root = self.temporary_cp0_root()
+        with temporary:
+            regs = root / "cp0/wk_cp0_regs.v"
+            contents = regs.read_text(encoding="utf-8")
+            self.assertIn("endmodule", contents)
+            regs.write_text(
+                contents.rsplit("endmodule", 1)[0]
+                + "// rtu_cp0_int_ack is documentation, not a consumer\n"
+                + 'initial $display("rtu_cp0_int_ack");\nendmodule'
+                + contents.rsplit("endmodule", 1)[1],
+                encoding="utf-8",
+            )
+
+            completed = self.run_checker("--root", str(root))
+
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_rejects_mcip_request_side_delegation_bit_drift(self) -> None:
+        temporary, root = self.temporary_cp0_root()
+        with temporary:
+            regs = root / "cp0/wk_cp0_regs.v"
+            contents = regs.read_text(encoding="utf-8")
+            original = "&& mcip_en && mideleg_value[23];"
+            self.assertIn(original, contents)
+            regs.write_text(
+                contents.replace(original, "&& mcip_en && mideleg_value[22];", 1),
+                encoding="utf-8",
+            )
+
+            completed = self.run_checker("--root", str(root))
+
+        self.assertNotEqual(0, completed.returncode)
+        self.assertIn("mcip delegation", completed.stderr.lower())
+
+    def test_rejects_mcip_trap_side_becoming_delegated(self) -> None:
+        temporary, root = self.temporary_cp0_root()
+        with temporary:
+            regs = root / "cp0/wk_cp0_regs.v"
+            contents = regs.read_text(encoding="utf-8")
+            original = "&& |(vec_num[18:0] & mideleg_value[18:0]);"
+            self.assertIn(original, contents)
+            regs.write_text(
+                contents.replace(
+                    original,
+                    "&& (rtu_yy_xx_expt_vec[4:0] == 5'd23 "
+                    "|| |(vec_num[18:0] & mideleg_value[18:0]));",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+
+            completed = self.run_checker("--root", str(root))
+
+        self.assertNotEqual(0, completed.returncode)
+        self.assertIn("mcip delegation", completed.stderr.lower())
+
+    def test_rejects_wfi_ack_missing_biu_term(self) -> None:
+        temporary, root = self.temporary_cp0_root()
+        with temporary:
+            lpmd = root / "cp0/wk_cp0_lpmd.v"
+            contents = lpmd.read_text(encoding="utf-8")
+            original = "                  && biu_yy_xx_no_op\n"
+            self.assertIn(original, contents)
+            lpmd.write_text(contents.replace(original, "", 1), encoding="utf-8")
+
+            completed = self.run_checker("--root", str(root))
+
+        self.assertNotEqual(0, completed.returncode)
+        self.assertIn("wfi no-op/wakeup fsm", completed.stderr.lower())
+
+    def test_rejects_wfi_wakeup_missing_debug_term(self) -> None:
+        temporary, root = self.temporary_cp0_root()
+        with temporary:
+            lpmd = root / "cp0/wk_cp0_lpmd.v"
+            contents = lpmd.read_text(encoding="utf-8")
+            original = "biu_cp0_int_wakeup || rtu_yy_xx_dbgon || biu_cp0_event_wakeup"
+            self.assertIn(original, contents)
+            lpmd.write_text(
+                contents.replace(
+                    original,
+                    "biu_cp0_int_wakeup || biu_cp0_event_wakeup",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+
+            completed = self.run_checker("--root", str(root))
+
+        self.assertNotEqual(0, completed.returncode)
+        self.assertIn("wfi no-op/wakeup fsm", completed.stderr.lower())
+
+    def test_invalid_cli_is_one_contract_failure_line(self) -> None:
+        completed = self.run_checker("--not-a-real-option")
+
+        self.assertNotEqual(0, completed.returncode)
+        self.assertEqual("", completed.stdout)
+        self.assertEqual(1, len(completed.stderr.splitlines()))
+        self.assertTrue(completed.stderr.startswith("CP0_CONTRACT_FAIL: "))
 
     def test_rejects_duplicate_checked_interrupt_source_assignment(self) -> None:
         temporary, root = self.temporary_cp0_root()

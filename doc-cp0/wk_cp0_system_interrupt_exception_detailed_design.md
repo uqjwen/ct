@@ -64,7 +64,7 @@ RTU trap vector/EPC/TVAL/valid ------------------------------------+
 |`cp0_rtu_xx_vec`|输出|5，寄存保持|优先命中的 cause；无新请求时保持上一值。|
 |`cp0_dtu_mexpt_vld`, `cp0_dtu_priv_mode`|输出|1/2|M 目标 trap 可见性与当前特权给 debug；前者由 `rtu_yy_xx_expt_vld & ~mdeleg_vld`。|
 |`cp0_iu_ex3_expt_vld/vec/mtval`|输出|1/5/32|CP0 本地非法指令：cause 2，TVAL=opcode；valid 保持至 flush 或下一 EX2 更新。|
-|`cp0_iu_ex3_mret/sret`, `cp0_iu_ex3_efpc[_vld]`|输出|1/1/`PC-1`|IUI 类型输出与 REGS xRET 返回半字地址；return 类型与 privilege 门控关系见第 8 节。|
+|`cp0_iu_ex3_mret/sret`, `cp0_iu_ex3_efpc[_vld]`|输出|1/1/`PC-1`|IUI 类型输出与 REGS xRET 返回半字地址；return 类型与 privilege 门控关系见第 7 节。|
 |`cp0_ifu_vbr`|输出|`WK_PC_WIDTH`|当前 M/S 目标 `mtvec/stvec` base 加 mode[0]；完整向量 offset 属下游合同。|
 |`cp0_biu_int_vld`|输出|1，高有效、常开低功耗路径|CP0 对 BIU 的 local-enabled pending 通知；它本身不直接唤醒 CP0，BIU 若决定唤醒须回送 `biu_cp0_int_wakeup`。|
 |`cp0_biu_lpmd_b`, `cp0_yy_clk_en`|输出|2，低有效编码 / 1|低功耗请求 `00` 与核心时钟使能；BIU 必须配合 no-op。|
@@ -104,7 +104,7 @@ RTU trap vector/EPC/TVAL/valid ------------------------------------+
 
 **RTL实现**：cause 1/3/5/7/9/11 的 CSR pending/enable 路径按 MIP/MIE（及可见的 SIP/SIE）组合；表中 source 由机械检查器提取。对 cause 13/23，`moip/mcip`、`moie/mcie`、`*_en`、`*_nodeleg_vld`/`*_deleg_vld` 与 `int_sel` 有无条件的直接实现，故 source→enable→priority/select 可独立验证。
 
-**待集成确认（cause 13/23 CSR/delegation）**：13/23 在 `MIE/MIP/SIE/SIP` 的 CSR alias/readback 以及 `mideleg[13/23]` 的可写/委托值使用 AIA major arrays；这些 arrays 由仓库外 `WK_MAJOR_INT_NUM`、`WK_MAJOR_SUPER_INT_MASK`、`WK_MAJOR_HYPER_INT_MASK`（以及 virtual mask）生成。本工作树不能证明 mask 是否使 13/23 成为 M/S 可见或可委托位。动态验证应分别按实际宏配置比对 CSR/readback/delegation；不可把直接 selection 存在误写成 CSR/委托已配置。关键赋值在 `wk_cp0_regs.v:2610-2714`, `:2731-2792`, `:2925-2944`, `:5597-5735`，ECC 在 `:3966-4036`。
+**RTL实现 / 待集成确认（cause 13/23 CSR/delegation）**：13/23 在 `MIE/MIP/SIE/SIP` 的 CSR alias/readback 以及 `mideleg[13/23]` 的可写/委托值使用 AIA major arrays；这些 arrays 由仓库外 `WK_MAJOR_INT_NUM`、`WK_MAJOR_SUPER_INT_MASK`、`WK_MAJOR_HYPER_INT_MASK`（以及 virtual mask）生成，本工作树不能证明实际 mask 配置。另有一个不依赖宏取值的结构事实：请求侧 `mcip_deleg_vld` 可由 `mideleg_value[23]` 选入 S 槽，但 trap 侧 `mideleg_vld` 仅计算 `vec_num[18:0] & mideleg_value[18:0]`，且 `vec_num` 没有 cause 23 decode。因此 RTU 回送 interrupt cause 23 时 `mideleg_vld=0`，trap CSR/status/`pm` 按 M 目标更新，即使该请求来自 delegated MCIP 槽。动态验证应分别按实际宏配置比对 CSR/readback/request delegation，并把 cause-23 request target 与 returned-trap target 分开建模。关键赋值在 `wk_cp0_regs.v:2295-2371`, `:2610-2714`, `:2731-2792`, `:2925-2944`, `:5597-5735`，ECC 在 `:3966-4036`。
 
 将每个 cause 的候选写为：
 
@@ -112,19 +112,24 @@ RTU trap vector/EPC/TVAL/valid ------------------------------------+
 P[c] = source/csr-pending[c]
 L[c] = P[c] && local_enable[c]               // MIE/SIE 对应位
 M_eligible[c] = L[c] && !mideleg[c] && (pm==M ? mstatus.MIE : 1)
-S_eligible[c] = L[c] &&  mideleg[c] && (pm==S ? sstatus.SIE : pm==U)
+S_request_eligible[c] = L[c] && mideleg[c] && (pm==S ? sstatus.SIE : pm==U)
 ```
 
-上式是对源码分支的独立参考表达：非委托路径在 M 当前模式须 `MIE=1`，在 S/U 可达；委托路径仅在 S/U 可达，在 S 当前模式须 `SIE=1`。实际 RTL 对 M 专属 cause（MEI/MSI/MTI）以 M 路选择，对 S/major cause使用相应 nodeleg/deleg 选择；比较必须以 `int_sel` 为最终裁决。
+上式只计算 request 侧：非委托路径在 M 当前模式须 `MIE=1`，在 S/U 可达；委托请求路径仅在 S/U 可达，在 S 当前模式须 `SIE=1`。实际 RTL 对 M 专属 cause（MEI/MSI/MTI）以 M 路选择，对 S/major cause 使用相应 nodeleg/deleg 选择；比较必须以 `int_sel` 为最终裁决。RTU 回送后的 trap 目标必须再由 `mideleg_vld` 独立计算，不能沿用 request 槽目标。
 
-|当前模式|`mideleg[c]`|M 路可取 trap|S 路可取 trap|说明|
+|当前模式|`mideleg[c]`|M request 槽|S request 槽|request 侧说明|
 |---|---:|---|---|---|
-|M|0|`MIE && L`|否|M 不向 S 委托。|
-|M|1|实现不走 S trap|否|**RTL实现**委托 S 路仅 S/U 允许。|
+|M|0|`MIE && L`|否|M 不产生 S 委托请求。|
+|M|1|否|否|**RTL实现**委托 S request 仅 S/U 允许。|
 |S|0|`L`|否|高特权 M 中断无需 SIE。|
 |S|1|否|`SIE && L`|委托到 S。|
 |U|0|`L`|否|非委托转 M。|
 |U|1|否|`L`|委托转 S。|
+
+|RTU 回送 interrupt cause|`vec_num` one-hot / `mideleg_vld`|trap 目标|
+|---:|---|---|
+|1、5、9、13（相应 `mideleg` 位有效）|有对应 one-hot；在 S/U 可与 `mideleg_value[18:0]` 相交|S；否则 M。|
+|23|无 cause-23 one-hot；不能参与 19-bit 相交|固定分类为 M。|
 
 ### 3.2 15 槽固定优先级
 
@@ -141,7 +146,7 @@ S_eligible[c] = L[c] &&  mideleg[c] && (pm==S ? sstatus.SIE : pm==U)
 |8|1|是|SSIP 非委托（M）|
 |7|5|是|STIP 非委托（M）|
 |6|13|是|MOIP 非委托（M）|
-|5|23|是|MCIP 委托（S）|
+|5|23|是|MCIP 委托 request 槽；RTU 回送 cause 23 后 trap 仍分类为 M|
 |4|18|否，硬连 0|MHIP decode 遗留行|
 |3|9|是|SEIP 委托（S）|
 |2|1|是|SSIP 委托（S）|
@@ -165,7 +170,7 @@ S_eligible[c] = L[c] &&  mideleg[c] && (pm==S ? sstatus.SIE : pm==U)
 |CP0 本地非法 CSR/系统指令|IUI|cause 2、32-bit opcode MTVAL 到 IU；其后由系统 trap 流程接收。|
 |RTU 系统 trap|RTU|`rtu_yy_xx_expt_vec[5:0]`、EPC、MTVAL 与 valid 输入 REGS；CP0 不重新判上游异常优先级。|
 
-有效异常委托不是“所有 medeleg 位可写”这一泛化说法。对非 interrupt 的 `vec_num` 路径，**RTL实现**有效可委托集合为 `{1,2,3,4,5,6,7,8,9,12,13,15}`。cause `0,10,11,14` 没有对应 decode；cause 16/17/18 虽然在 19-bit `vec_num` 中有 one-hot decode，但 `medeleg_vld` 计算为 `|(vec_num[15:0] & edeleg[15:0])`，高三位在此截断，故仍不能有效委托；其余 `>=19` 不被该 decode 枚举。`medeleg` 写掩码虽包括 bit 0，却没有对应 one-hot decode，故 cause 0 实际不委托（第 8 节保留为待确认项）。
+有效异常委托不是“所有 medeleg 位可写”这一泛化说法。对非 interrupt 的 `vec_num` 路径，**RTL实现**有效可委托集合为 `{1,2,3,4,5,6,7,8,9,12,13,15}`。cause `0,10,11,14` 没有对应 decode；cause 16/17/18 虽然在 19-bit `vec_num` 中有 one-hot decode，但 `medeleg_vld` 计算为 `|(vec_num[15:0] & edeleg[15:0])`，高三位在此截断，故仍不能有效委托；其余 `>=19` 不被该 decode 枚举。`medeleg` 写掩码虽包括 bit 0，却没有对应 one-hot decode，故 cause 0 实际不委托（第 7 节保留为待确认项）。同一 `vec_num` 也供 interrupt 的 `mideleg_vld` 使用；因此 cause 23 无 decode 会造成上一节所述的 request/trap 目标不一致。
 
 |cause 范围|`medeleg[c]=1` 的有效性|目标规则|
 |---|---|---|
@@ -254,7 +259,7 @@ function pending(s):
           9:s.seip_s|s.biu_se, 11:s.biu_me, 13:s.hpcp,
           23:s.ecc_vld & (s.dcache_ecc_vld | s.err_fatal)}
 
-function eligible(c, s):
+function request_eligible(c, s):
   local = pending(s)[c] & s.local_enable[c]
   if !local: return NONE
   if s.mideleg[c] == 0:
@@ -266,13 +271,18 @@ function select_interrupt(s):
   slots = [(23,M),(18,UNREACHABLE),(11,M),(3,M),(7,M),(9,M),(1,M),(5,M),(13,M),
            (23,S),(18,UNREACHABLE),(9,S),(1,S),(5,S),(13,S)]
   for c,target in slots:
-     if target != UNREACHABLE and eligible(c,s) == target: return (c,target)
+     if target != UNREACHABLE and request_eligible(c,s) == target: return (c,target)
   return NONE
 
 function trap_target(vec, s):
   c=vec[4:0]
   if vec[5]==0 and c not in {1,2,3,4,5,6,7,8,9,12,13,15}: return M
-  return S if s.pm in {S,U} and s.deleg[vec[5]][c] else M
+  if vec[5]==1:
+     # RTL mideleg_vld requires the cause's vec_num one-hot inside bits 18:0.
+     # Cause 23 has no vec_num row, so even a delegated MCIP request returns to M.
+     if c==23 or c not in VEC_NUM_CAUSES: return M
+     return S if s.pm in {S,U} and s.mideleg[c] else M
+  return S if s.pm in {S,U} and s.medeleg[c] else M
 
 function apply_trap(s, vec, epc, tval):
   t=trap_target(vec,s)
@@ -322,7 +332,7 @@ function apply_trap_csrs(s, e):
 |D06|U、SSIP+SSIE、mideleg[1]=1|运行一拍|vec=1，S target，不需 SIE。|
 |D07|U、STIP+STIE、mideleg[5]=0|运行一拍|vec=5，M target。|
 |D08|M、MCIP 和 MEIP 同时有效|运行一拍|vec=23，slot14 胜 slot12。|
-|D09|S、委托 MCIP/SEIP/SSIP/STIP/MOIP 同时有效|运行一拍|vec=23，slot5 优先。|
+|D09|S、SIE=1，`mideleg[23]=1`，MCIP/SEIP/SSIP/STIP/MOIP 同时有效|先观察 request，再由 RTU 回送 interrupt cause 23|下一拍 request `vec=23`、slot5 优先；回送 trap 时因 `vec_num` 无 cause23，`mideleg_vld=0`，写 M trap CSR/status 且 `pm->M`，不得期待 S trap。|
 |D10|构造所有 live slot 各一次|扫描|13 个 cause/slot 映射与表一致；bit13/4 永不选中。|
 |D11|D02 后不改变 pending，仅拉 `rtu_cp0_int_ack`|ack pulse|request 仍由源/enable 决定；ack 不清源。|
 |D12|BIU MEI level 置后回落|源回落|pending/request 在后续采样撤销；vec 可保持。|
@@ -342,12 +352,12 @@ function apply_trap_csrs(s, e):
 
 ### 6.3 断言/性质描述
 
-1. **极性**：每个采样周期 `cp0_rtu_xx_int_b == !|int_sel` 的寄存下一值；LSU 同极性。
-2. **向量稳定**：无 `int_sel` 时 `cp0_rtu_xx_vec` 保持；有选中时等于首个 live slot cause。
+1. **寄存请求极性/时序**：以 `forever_cpuclk` 为采样时钟，`disable iff (!cpurst_b)`，并用 `$past(cpurst_b)` 屏蔽 reset 释放后的首个采样；之后 `cp0_rtu_xx_int_b == !(|$past(regs_iui_int_sel))`，`cp0_lsu_xx_int_b` 同值。也就是说本拍 `regs_iui_int_sel` 只决定下一拍低有效请求，不能写成同拍组合断言。
+2. **寄存向量更新/保持**：使用与性质 1 相同的 reset 和首个 post-reset guard；若 `$past(|regs_iui_int_sel)`，本拍 `cp0_rtu_xx_vec` 等于对 `$past(regs_iui_int_sel)` 首个 live slot 编码的 cause；若 `$past(|regs_iui_int_sel)==0`，则本拍必须满足 `$stable(cp0_rtu_xx_vec)`。reset 期间只检查向量清零，不在首个 post-reset 样本使用无定义的 `$past`。
 3. **优先级**：任意两个 live source 同时有效时，较小表行号（slot14→0）胜出。
 4. **不可达槽**：`int_sel[13]==0 && int_sel[4]==0`，不得输出 cause 18。
 5. **非委托资格**：M 当前模式下 `MIE=0` 阻断每个 nondelegated local-enabled pending。
-6. **委托资格**：S 当前模式下 `SIE=0` 阻断 delegated pending；U 当前模式可达。
+6. **委托 request 与 trap 分离**：S 当前模式下 `SIE=0` 阻断 delegated request，U 当前模式可达；对 MCIP 还必须断言 `mideleg_value[23]` 可使 request 选择 slot5，但 RTU 回送 interrupt cause23 时 `mideleg_vld==0`、M trap 状态获写。其它可委托 cause 按其 `vec_num` one-hot 检查 S/M trap target。
 7. **状态栈 M**：M trap 后 `MPP==$past(pm), MPIE==$past(MIE), MIE==0`。
 8. **状态栈 S**：S trap 后 `SPP==$past(pm[0]), SPIE==$past(SIE), SIE==0`。
 9. **xRET 恢复**：合法 MRET/SRET 恢复 xIE、置 xPIE、清 xPP，并使 `efpc` 为对应 xEPC 的半字地址。
@@ -374,7 +384,7 @@ scoreboard 在 `forever_cpuclk` 后采 pending/request/vector，在 `regs_flush_
 4. `medeleg` 写掩码可写 bit0、而 cause0 无 one-hot decode：确认 cause0 实际不委托是否为预期。
 5. `mtvec/stvec` 内部存两位 mode，但 CSR readback 与 VBR 都仅输出 mode[0]、清 mode[1]：确认非法 vector-mode 的 WARL 可见行为。
 6. `rtu_cp0_expt_vld` 与 `rtu_yy_xx_expt_vld` 分别驱动 CSR/status 与 `pm`：确认二者 dual-valid 周期一致性。
-7. `ADD_AIA` 条件 IMSIC bridge 与仓库外 `WK_MAJOR_*` 宏依赖：确认两套配置的 filelist、宏和功能闭合。
+7. AIA/major-interrupt 合同：`ADD_AIA` 条件 IMSIC bridge 与仓库外 `WK_MAJOR_*` 宏决定两套配置的 filelist、CSR mask 和功能闭合；同时确认 MCIP request 侧允许 `mideleg_value[23]` 选择 slot5、但 trap 侧因 `vec_num` 无 cause23 而固定分类 M 的行为是否为系统预期，并覆盖 request-target/trap-target 不一致。
 8. `cp0_ifu_vbr` 只给 base/mode：确认 IFU/下游的 vector offset 计算、align 和采样时刻。
 9. `biu_cp0_ss_int` 置位 `mvssip` 后为 sticky：确认软件清除、重复置位和输入回落的系统协议。
 
@@ -382,14 +392,14 @@ scoreboard 在 `forever_cpuclk` 后采 pending/request/vector，在 `regs_flush_
 
 |主题|权威 RTL 锚点|
 |---|---|
-|topology / 子模块|`cp0/wk_cp0_top.v:1042`, `:1162`, `:1475`|
-|IUI decode/FSM/privilege|`cp0/wk_cp0_iui.v:928-1027`, `:1406-1505`, `:1680-1805`|
-|IUI 本地异常与中断 request|`cp0/wk_cp0_iui.v:1967-2054`|
-|status stack/delegation/enable/pending|`cp0/wk_cp0_regs.v:2144-2247`, `:2280-2371`, `:2382-2481`, `:2531-2714`|
-|S trap state|`cp0/wk_cp0_regs.v:2731-2792`, `:2846-2944`|
-|privilege, return, VBR/efpc|`cp0/wk_cp0_regs.v:2461-2481`, `:2772-2792`, `:3207-3268`, `:5006-5014`, `:5145-5186`, `:5574-5579`|
-|ECC/AIA|`cp0/wk_cp0_regs.v:3966-4036`, `:5597-6104`|
-|WFI|`cp0/wk_cp0_lpmd.v:161-265`|
+|topology / 子模块|[`cp0/wk_cp0_top.v:1042`](../cp0/wk_cp0_top.v), [`:1162`](../cp0/wk_cp0_top.v), [`:1475`](../cp0/wk_cp0_top.v)|
+|IUI decode/FSM/privilege|[`cp0/wk_cp0_iui.v:928-1027`](../cp0/wk_cp0_iui.v), [`:1406-1505`](../cp0/wk_cp0_iui.v), [`:1680-1805`](../cp0/wk_cp0_iui.v)|
+|IUI 本地异常与中断 request|[`cp0/wk_cp0_iui.v:1967-2054`](../cp0/wk_cp0_iui.v)|
+|status stack/delegation/enable/pending|[`cp0/wk_cp0_regs.v:2144-2247`](../cp0/wk_cp0_regs.v), [`:2280-2371`](../cp0/wk_cp0_regs.v), [`:2382-2481`](../cp0/wk_cp0_regs.v), [`:2531-2714`](../cp0/wk_cp0_regs.v)|
+|S trap state|[`cp0/wk_cp0_regs.v:2731-2792`](../cp0/wk_cp0_regs.v), [`:2846-2944`](../cp0/wk_cp0_regs.v)|
+|privilege, return, VBR/efpc|[`cp0/wk_cp0_regs.v:2461-2481`](../cp0/wk_cp0_regs.v), [`:2772-2792`](../cp0/wk_cp0_regs.v), [`:3207-3268`](../cp0/wk_cp0_regs.v), [`:5006-5014`](../cp0/wk_cp0_regs.v), [`:5145-5186`](../cp0/wk_cp0_regs.v), [`:5574-5579`](../cp0/wk_cp0_regs.v)|
+|ECC/AIA|[`cp0/wk_cp0_regs.v:3966-4036`](../cp0/wk_cp0_regs.v), [`:5597-6104`](../cp0/wk_cp0_regs.v)|
+|WFI|[`cp0/wk_cp0_lpmd.v:161-265`](../cp0/wk_cp0_lpmd.v)|
 
 机械合同检查命令：
 
@@ -397,4 +407,4 @@ scoreboard 在 `forever_cpuclk` 后采 pending/request/vector，在 `regs_flush_
 python3 tools/check_interaction_2_3_cp0_contract.py --json
 ```
 
-成功 marker 为 JSON 包含四模块、八个 interrupt sources、15 个 priority slots（13 live、2 hardwired-zero）、预期 exception delegation 集合和 `ack_consumers: 0`。该 marker 只证明抽取到的静态合同，不证明 CP0 编译、RTL 仿真、断言、代码覆盖或功能覆盖通过。
+成功 JSON 包含四模块、八个 interrupt sources、15 个 priority slots（13 live、2 hardwired-zero）、预期 exception delegation 集合、精确五项 `key_paths`、`ack_consumers: 0`，以及 `mcip_delegation={cause:23, request_selects_supervisor:true, trap_classifies_supervisor:false}`。ACK 计数仅覆盖 `wk_cp0_regs` module body：忽略注释、字符串文本和无初始化声明，但保留 `wire/reg ... = rtu_cp0_int_ack` 初始化右值及独立语句中的语义引用。该 JSON 只证明抽取到的静态合同，不证明 CP0 编译、RTL 仿真、断言、代码覆盖或功能覆盖通过。

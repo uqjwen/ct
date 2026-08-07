@@ -18,15 +18,15 @@
 - Do not claim full CP0 compile, VCS simulation, regression, code coverage, functional coverage, or URG success. The repository lacks a complete CP0 filelist, external dependencies, `WK_MAJOR_*` macro definitions, and dynamic evidence.
 - Use TDD for the executable checker: observe RED before implementation, then GREEN. Human-facing prose earns manual source review, not exact-phrase tests.
 - Tests must run the real checker. Mutation tests must name and catch a concrete stale-document failure; do not grep Chinese prose.
-- The final document must identify the active-low interrupt request polarity, the 15-slot/13-live fixed priority, the 12 effective delegated exception causes, the unused `rtu_cp0_int_ack`, and the distinction between interrupt wakeup and trap eligibility.
+- The final document must identify the active-low interrupt request polarity, the 15-slot/13-live fixed priority, the 12 effective delegated exception causes, the unused `rtu_cp0_int_ack`, the delegated-MCIP request/trap target mismatch, and the distinction between interrupt wakeup and trap eligibility.
 - All final claims must be verified again on integrated `main` before non-force push.
 
 ## File Responsibility Map
 
 |File|Responsibility|
 |---|---|
-|`tests/test_interaction_2_3_cp0_contract.py`|Runs the real checker and proves it rejects priority, topology, and ack-consumer drift.|
-|`tools/check_interaction_2_3_cp0_contract.py`|Parses the CP0 RTL into the stable module/source/priority/delegation/ack contract.|
+|`tests/test_interaction_2_3_cp0_contract.py`|Runs the real checker and proves it rejects priority, topology, MCIP delegation, ACK-consumer, WFI-path, and CLI-contract drift.|
+|`tools/check_interaction_2_3_cp0_contract.py`|Parses the CP0 RTL into the stable module/source/priority/delegation/ACK/key-path contract.|
 |`doc-cp0/wk_cp0_system_interrupt_exception_detailed_design.md`|Primary system interrupt/exception design and verification reference.|
 |`docs/interaction-2.3-followup-review.md`|README closure, evidence summary, scope audit, and dynamic-signoff boundary.|
 |`docs/superpowers/specs/2026-08-07-interaction-2.3-cp0-design.md`|Approved design and source-fact model.|
@@ -44,12 +44,12 @@
 - CLI: `python3 tools/check_interaction_2_3_cp0_contract.py [--root PATH] [--json]`
 - Default root: repository root derived from the checker file location
 - Success marker: `CP0_CONTRACT_PASS modules=4 submodules=3 interrupt_sources=8 priority_slots=15 live_slots=13 delegable_exceptions=12 ack_consumers=0`
-- JSON keys: `modules`, `top_submodules`, `interrupt_sources`, `interrupt_priority`, `delegable_exceptions`, `ack_consumers`, `key_paths`
+- JSON keys: `modules`, `top_submodules`, `interrupt_sources`, `interrupt_priority`, `delegable_exceptions`, `mcip_delegation`, `ack_consumers`, `key_paths`
 - Failure: nonzero exit and one concise `CP0_CONTRACT_FAIL:` message on stderr
 
 - [ ] **Step 1: Write the failing real-RTL and mutation tests**
 
-Create four tests:
+Create the focused real-RTL and mutation suite (13 tests at final review):
 
 1. `test_real_rtl_contract_passes_and_reports_hand_derived_facts` runs the checker with `--json`, asserts exit 0, and compares literal hand-derived values:
    - modules: `wk_cp0_top`, `wk_cp0_iui`, `wk_cp0_regs`, `wk_cp0_lpmd`;
@@ -57,11 +57,14 @@ Create four tests:
    - eight source expressions for `meip`, `mtip`, `msip`, `seip`, `stip`, `ssip`, `mcip`, `moip`;
    - cause order: `[23,18,11,3,7,9,1,5,13,23,18,9,1,5,13]` with slot-live flags derived from the two `1'b0` entries;
    - delegated exceptions: `[1,2,3,4,5,6,7,8,9,12,13,15]`;
+   - MCIP delegation fact: cause 23, request-side S selection true, trap-side S classification false;
    - ack consumers: `0`;
-   - all key-path booleans true.
+   - exact five-key `key_paths` mapping, all values true.
 2. `test_rejects_interrupt_priority_cause_drift` copies `cp0/` into a temporary root, changes the highest `valid_int_vec` cause from 23 to 22, runs the real checker against the copy, and expects failure mentioning priority.
 3. `test_rejects_missing_top_submodule` removes/renames the `wk_cp0_lpmd x_wk_cp0_lpmd` instance in the temporary copy and expects topology failure.
 4. `test_rejects_new_interrupt_ack_consumer` adds a continuous assignment consuming `rtu_cp0_int_ack` before `wk_cp0_regs` endmodule and expects ack-consumer failure.
+
+Also cover priority-selector and duplicate-assignment drift, `wire` declaration-assignment ACK consumption, comment/string non-consumers, both sides of the MCIP delegation fact, BIU no-op/debug-wake removal, and invalid argparse input's single-line failure contract.
 
 The mutations represent a stale verification reference being incorrectly accepted; they are not tests of comments or formatting.
 
@@ -94,10 +97,11 @@ ssip_deleg_vld, stip_deleg_vld, moip_deleg_vld
 
 - parse the IUI `casez(regs_iui_int_sel[14:0])` rows and preserve all 15 cause values;
 - derive the effective delegated exception set by intersecting the one-hot bit selected by `vec_num` with the writable source-bit set represented by `edeleg_upd_val`;
-- count `rtu_cp0_int_ack` semantic consumers in `wk_cp0_regs` after comments, port-list entry, and input declaration are excluded; any consumer is a contract failure;
-- validate key paths structurally: IUI illegal cause/mtval, M trap CSR update, S trap CSR update, MRET/SRET return PC, and WFI no-op/wakeup FSM;
+- count `rtu_cp0_int_ack` semantic consumers in `wk_cp0_regs` after comments, strings, the port-list entry, and bare declarations are excluded; declaration initializers such as `wire used = rtu_cp0_int_ack;` remain consumers and fail;
+- expose and validate the structured MCIP fact: request-side delegated selection uses `mideleg_value[23]`, while trap-side `mideleg_vld` cannot classify returned cause 23 as S because `vec_num` ends at cause 18;
+- validate exactly five key paths structurally: IUI illegal cause/mtval, M trap CSR update, S trap CSR update, MRET/SRET return PC, and WFI no-op/wakeup FSM; WFI requires all four ack and all four wake terms;
 - emit deterministic JSON with `--json`; otherwise emit the exact success marker;
-- catch expected parse/contract exceptions in `main()` and emit one failure line without a traceback.
+- catch expected parse/contract/argparse failures in `main()` and emit one failure line without a traceback.
 
 - [ ] **Step 4: Run focused GREEN and mutation check**
 
@@ -109,7 +113,7 @@ python3 tools/check_interaction_2_3_cp0_contract.py
 python3 tools/check_interaction_2_3_cp0_contract.py --json
 ```
 
-Expected: four tests pass, the marker has the exact counts above, and JSON is stable and parseable.
+Expected: 13 tests pass, the marker has the exact counts above, and JSON is stable and parseable.
 
 - [ ] **Step 5: Self-review and commit**
 
@@ -205,7 +209,7 @@ Provide:
 
 - [ ] **Step 7: Add source-observed integration questions and anchors**
 
-List, without silently repairing or overclaiming, all nine items from section 8 of the design spec: unused ack, unqualified return-type output, sticky CP0 exception valid, cause-0 delegation mismatch, vector-mode WARL behavior, dual RTU valid signals, AIA macro/config dependency, downstream vector offset, and sticky `biu_cp0_ss_int` path.
+List, without silently repairing or overclaiming, all nine items from section 8 of the design spec (rendered as section 7 in the detailed design): unused ack, unqualified return-type output, sticky CP0 exception valid, cause-0 delegation mismatch, vector-mode WARL behavior, dual RTU valid signals, the expanded AIA/major-interrupt item including MCIP request/trap delegation mismatch, downstream vector offset, and sticky `biu_cp0_ss_int` path.
 
 End with a source-anchor index and the Task 1 checker command/marker. Do not claim these items are confirmed bugs.
 
