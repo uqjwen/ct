@@ -31,7 +31,7 @@ RTU trap vector/EPC/TVAL/valid ------------------------------------+
           |                                                  |
           +--> IFU vector base / IU xRET halfword PC <------+
           |
-          +--> regs_lpmd_int_vld --> wk_cp0_lpmd WFI wake contract
+          +--> regs_lpmd_int_vld --> cp0_biu_int_vld --> BIU --> biu_cp0_int_wakeup
 ```
 
 |模块|**RTL实现**职责|主要锚点|
@@ -66,6 +66,7 @@ RTU trap vector/EPC/TVAL/valid ------------------------------------+
 |`cp0_iu_ex3_expt_vld/vec/mtval`|输出|1/5/32|CP0 本地非法指令：cause 2，TVAL=opcode；valid 保持至 flush 或下一 EX2 更新。|
 |`cp0_iu_ex3_mret/sret`, `cp0_iu_ex3_efpc[_vld]`|输出|1/1/`PC-1`|IUI 类型输出与 REGS xRET 返回半字地址；return 类型与 privilege 门控关系见第 8 节。|
 |`cp0_ifu_vbr`|输出|`WK_PC_WIDTH`|当前 M/S 目标 `mtvec/stvec` base 加 mode[0]；完整向量 offset 属下游合同。|
+|`cp0_biu_int_vld`|输出|1，高有效、常开低功耗路径|CP0 对 BIU 的 local-enabled pending 通知；它本身不直接唤醒 CP0，BIU 若决定唤醒须回送 `biu_cp0_int_wakeup`。|
 |`cp0_biu_lpmd_b`, `cp0_yy_clk_en`|输出|2，低有效编码 / 1|低功耗请求 `00` 与核心时钟使能；BIU 必须配合 no-op。|
 |`regs_iui_pm`, `regs_iui_v`|REGS→IUI|2/1|当前特权 M=`11`、S=`01`、U=`00` 和虚拟模式资格输入。|
 
@@ -98,10 +99,12 @@ RTU trap vector/EPC/TVAL/valid ------------------------------------+
 |7|MTIP|`biu_cp0_mt_int`|`mtie`；`MIP` 位 7|
 |9|SEIP|`seip_s | biu_cp0_se_int`|`seie`；`MIP/SIP` 位 9|
 |11|MEIP|`biu_cp0_me_int`|`meie`；`MIP` 位 11|
-|13|MOIP|`hpcp_cp0_int_vld`|`moie`；`MIP/SIP` 位 13|
-|23|MCIP|`ecc_int_vld = ecc_vld && (dcache_ecc_vld || err_fatal)`|`mcie`；`MIP/SIP` 位 23|
+|13|MOIP|`hpcp_cp0_int_vld`|直接 `moie && moip` 进入 enable/priority/select；CSR alias/delegation 见下方**待集成确认**。|
+|23|MCIP|`ecc_int_vld = ecc_vld && (dcache_ecc_vld || err_fatal)`|直接 `mcie && mcip` 进入 enable/priority/select；CSR alias/delegation 见下方**待集成确认**。|
 
-**RTL实现**：`MIP` 组合上述 pending，`MIE` 给出 local enable；`SIP/SIE` 受 `mideleg` 和 AIA alias/virtual 规则影响。表中 source 由机械检查器提取；关键赋值在 `wk_cp0_regs.v:2610-2714`, `:2731-2792`, `:2925-2944`，ECC 在 `:3966-4036`。
+**RTL实现**：cause 1/3/5/7/9/11 的 CSR pending/enable 路径按 MIP/MIE（及可见的 SIP/SIE）组合；表中 source 由机械检查器提取。对 cause 13/23，`moip/mcip`、`moie/mcie`、`*_en`、`*_nodeleg_vld`/`*_deleg_vld` 与 `int_sel` 有无条件的直接实现，故 source→enable→priority/select 可独立验证。
+
+**待集成确认（cause 13/23 CSR/delegation）**：13/23 在 `MIE/MIP/SIE/SIP` 的 CSR alias/readback 以及 `mideleg[13/23]` 的可写/委托值使用 AIA major arrays；这些 arrays 由仓库外 `WK_MAJOR_INT_NUM`、`WK_MAJOR_SUPER_INT_MASK`、`WK_MAJOR_HYPER_INT_MASK`（以及 virtual mask）生成。本工作树不能证明 mask 是否使 13/23 成为 M/S 可见或可委托位。动态验证应分别按实际宏配置比对 CSR/readback/delegation；不可把直接 selection 存在误写成 CSR/委托已配置。关键赋值在 `wk_cp0_regs.v:2610-2714`, `:2731-2792`, `:2925-2944`, `:5597-5735`，ECC 在 `:3966-4036`。
 
 将每个 cause 的候选写为：
 
@@ -151,7 +154,7 @@ S_eligible[c] = L[c] &&  mideleg[c] && (pm==S ? sstatus.SIE : pm==U)
 
 ### 3.3 WFI wake 与 trap 资格分离
 
-`regs_lpmd_int_vld = meip_en || mtip_en || msip_en || seip_en || stip_en || ssip_en || mcip_en || moip_en`，只看 pending/local enable，不使用上述 `pm`/global-enable/delegation trap 门控。故 `WFI wake`（再加 BIU/event/debug/DTU 四类 wake）不等于立即向 RTU 送 trap。此区别必须独立覆盖。
+`regs_lpmd_int_vld = meip_en || mtip_en || msip_en || seip_en || stip_en || ssip_en || mcip_en || moip_en`，只看 pending/local enable，不使用上述 `pm`/global-enable/delegation trap 门控。**RTL实现**：LPMD 仅将它转发为 `cp0_biu_int_vld` 通知 BIU；真正把 `lpmd_b` 恢复为 `11` 的 interrupt 输入是 BIU 回送的 `biu_cp0_int_wakeup`，另有 event/debug/DTU 三类输入。故 BIU 是否因通知产生 wake 是**接口合同**，`regs_lpmd_int_vld` 不直接唤醒 CP0；wake 也不等于立即向 RTU 送 trap。此区别必须独立覆盖。
 
 ## 4. 异常、trap entry、向量和 xRET
 
@@ -162,13 +165,14 @@ S_eligible[c] = L[c] &&  mideleg[c] && (pm==S ? sstatus.SIE : pm==U)
 |CP0 本地非法 CSR/系统指令|IUI|cause 2、32-bit opcode MTVAL 到 IU；其后由系统 trap 流程接收。|
 |RTU 系统 trap|RTU|`rtu_yy_xx_expt_vec[5:0]`、EPC、MTVAL 与 valid 输入 REGS；CP0 不重新判上游异常优先级。|
 
-有效异常委托不是“所有 medeleg 位可写”这一泛化说法。对非 interrupt 的 `vec_num` 路径，**RTL实现**有效可委托集合为 `{1,2,3,4,5,6,7,8,9,12,13,15}`；cause `0,10,11,14` 和 `>=16` 不会形成有效委托。`medeleg` 写掩码虽包括 bit 0，却没有对应 one-hot decode，故 cause 0 实际不委托（第 8 节保留为待确认项）。
+有效异常委托不是“所有 medeleg 位可写”这一泛化说法。对非 interrupt 的 `vec_num` 路径，**RTL实现**有效可委托集合为 `{1,2,3,4,5,6,7,8,9,12,13,15}`。cause `0,10,11,14` 没有对应 decode；cause 16/17/18 虽然在 19-bit `vec_num` 中有 one-hot decode，但 `medeleg_vld` 计算为 `|(vec_num[15:0] & edeleg[15:0])`，高三位在此截断，故仍不能有效委托；其余 `>=19` 不被该 decode 枚举。`medeleg` 写掩码虽包括 bit 0，却没有对应 one-hot decode，故 cause 0 实际不委托（第 8 节保留为待确认项）。
 
 |cause 范围|`medeleg[c]=1` 的有效性|目标规则|
 |---|---|---|
 |1–9, 12, 13, 15|有效|来自 S/U 的非中断 trap 进入 S；否则 M。|
 |0, 10, 11, 14|非有效|进入 M。|
-|>=16|非有效/本页四文件未提供扩展 decode|进入 M，扩展行为须另行集成证实。|
+|16–18|有 `vec_num` decode、但在 `vec_num[15:0] & edeleg[15:0]` 被截断，非有效|进入 M。|
+|>=19|无该 `vec_num` decode，非有效|进入 M；扩展行为须另行集成证实。|
 
 ### 4.2 trap CSR 与状态栈写入
 
@@ -179,6 +183,12 @@ S_eligible[c] = L[c] &&  mideleg[c] && (pm==S ? sstatus.SIE : pm==U)
 
 这些更新以 `rtu_cp0_expt_vld`/`mdeleg_vld` 控制（状态/CSR），而当前 `pm` 的更新使用 `rtu_yy_xx_expt_vld` 或 xRET。**待集成确认**：两个 RTU valid 必须对同一 trap 周期一致，避免 CSR 已写但 mode 未切换或相反。源锚点：`wk_cp0_regs.v:2144-2247`, `:2531-2714`, `:2731-2944`, `:3207-3268`。
 
+### 4.3 同拍并发优先级
+
+**RTL实现（当前特权 `pm`）**：当 `pm_wen` 为 1，`pm_wdata` 的精确优先级为 `rtu_cp0_exit_debug` > `rtu_cp0_enter_debug` > `iui_regs_inst_mret` > `iui_regs_inst_sret` > RTU trap target（`!mdeleg_vld`→M，`mdeleg_vld`→S）。因此同拍 debug exit/enter、xRET 与 trap 不能按“先后到达”的抽象规则比较，必须按此组合链采样。
+
+**RTL实现（status-stack / trap CSR）**：各 M 状态寄存器的优先级为 M trap > MRET > 对应 CSR write；各 S 状态寄存器为 S trap > SRET > 对应 CSR write。也就是说，同拍 matching trap 与 xRET 时 stack/CSR 取 trap 值，而 `pm` 仍按上表的 debug/xRET/trap 链更新；这种 dual-valid/并发组合必须由集成 testbench 显式约束或覆盖。锚点：`wk_cp0_regs.v:2144-2247`, `:2531-2600`, `:2846-2910`, `:3207-3268`。
+
 |事件|前置|状态转移|返回/后效|
 |---|---|---|---|
 |M trap|RTU trap、未有效委托|`pm -> M`；保存原 `pm` 到 MPP；`MPIE<-MIE, MIE<-0`|IFU 读取 M `mtvec`。|
@@ -188,9 +198,9 @@ S_eligible[c] = L[c] &&  mideleg[c] && (pm==S ? sstatus.SIE : pm==U)
 
 **验证要求**：非法 MRET/SRET 应走 cause-2 路径；由于 IUI 的 `cp0_mret/cp0_sret` 类型输出本身没有直接附加 `iui_privilege`，必须观察 REGS 的 `iui_regs_inst_*ret` 门控及 trap 优先级，不能只看类型脚。
 
-### 4.3 vector 与返回 PC
+### 4.4 vector 与返回 PC
 
-`mtvec/stvec` 都保存 base 与两位 mode；读给 IFU 的 `cp0_ifu_vbr` 选择当前 `pm` 的 base，保留 `mode[0]` 且把 mode[1] 强制为 0。`mepc/sepc` 写入/读回清 bit0；`cp0_iu_ex3_efpc` 以半字地址输出 `mepc/sepc[WK_PC_WIDTH-1:1]`，`efpc_vld=cp0_mret||cp0_sret`。锚点：`wk_cp0_regs.v:5006-5014`, `:5145-5186`。
+`mtvec/stvec` 内部保存 base 与两位 mode，但 CSR readback `mtvec_value/stvec_value={base,1'b0,mode[0]}` 强制 mode bit1 为 0；读给 IFU 的 `cp0_ifu_vbr` 同样选择当前 `pm` 的 base、保留 mode[0]、强制 mode[1]=0。`mepc/sepc` 写入/读回清 bit0；`cp0_iu_ex3_efpc` 以半字地址输出 `mepc/sepc[WK_PC_WIDTH-1:1]`，`efpc_vld=cp0_mret||cp0_sret`。锚点：`wk_cp0_regs.v:2461-2481`, `:2772-2792`, `:5006-5014`, `:5145-5186`。
 
 **接口合同 / 待集成确认**：CP0 没有计算 `BASE + 4*cause`；下游 IFU/vector 逻辑必须定义 vectored offset、何时采用 mode 和对齐。`mode[1]` 的被清行为使非法 mode 的 WARL 语义只能按此实现验证，不能借通用规范臆断。
 
@@ -201,10 +211,10 @@ S_eligible[c] = L[c] &&  mideleg[c] && (pm==S ? sstatus.SIE : pm==U)
 |状态|进入条件|输出/离开|
 |---|---|---|
 |IDLE (`00`)|reset、flush 或没有 WFI|`inst_lpmd_ex1_ex2` 时入 SWAIT。|
-|SWAIT (`01`)|WFI 在 EX1/EX2 且资格通过|对 IFU/LSU/MMU 拉 `*_no_op_req`；仅 `ifu && lsu && biu && mmu` 四个 no-op 都为 1 时进 LPMD。|
+|SWAIT (`01`)|前一拍有效 WFI 使 FSM 从 IDLE 进入|`*_no_op_req` 来自已寄存的 `lpmd_in_wait_state`；仅 `ifu && lsu && biu && mmu` 四个 no-op 都为 1 时进 LPMD。|
 |LPMD (`10`)|得到 `lpmd_ack`|若 `cpu_in_lpmd` 解除则回 IDLE，并给 `lpmd_cmplt`。|
 
-**RTL实现**：`lpmd_ack` 包含四个确认，`lpmd_b` reset=`11`，在 ack+有效 WFI 时写 `00`；BIU interrupt wake、event wake、RTU debug-on 或 DTU wake 之一使其恢复 `11`；`cp0_yy_clk_en=lpmd_b[1]&lpmd_b[0]`。WFI/flush 在 SWAIT 的竞争以源码优先级为准。锚点：`wk_cp0_lpmd.v:161-265`。
+**RTL实现**：`lpmd_ack` 包含四个确认，`lpmd_b` reset=`11`，在 ack+有效 WFI 时写 `00`；BIU interrupt wake、event wake、RTU debug-on 或 DTU wake 之一使其恢复 `11`；`cp0_yy_clk_en=lpmd_b[1]&lpmd_b[0]`。`regs_lpmd_int_vld` 只经 `cp0_biu_int_vld` 通知 BIU，RTL 没有将它直接接到 `lpmd_b` 的 wake 条件；BIU 反馈 `biu_cp0_int_wakeup` 才是 interrupt wake。WFI/flush 在 SWAIT 的竞争以源码优先级为准。锚点：`wk_cp0_lpmd.v:161-265`。
 
 ### 5.2 ECC、Debug 和 AIA
 
@@ -228,7 +238,7 @@ S_eligible[c] = L[c] &&  mideleg[c] && (pm==S ? sstatus.SIE : pm==U)
 |中断检测|组合 `P/L/eligible/int_sel` 出现|`*_int_b=0`、vec 更新；撤源后下一状态 `*_int_b=1`，vec 保持。|
 |RTU trap 写入|RTU valid+vec/EPC/TVAL 采样|对应 M/S CSR、status stack 写入；`rtu_yy_xx_expt_vld` 驱动 mode 更新。|
 |xRET|合法 IUI 在 EX2，REGS `inst_*ret`|恢复 IE/privilege，输出半字 `efpc` 与 valid。|
-|WFI|EX1/EX2 有效 WFI 拉 no-op request|四 ack 后 `lpmd_b=00`/clock off；任一 wake 后 `11`/完成。|
+|WFI|EX1/EX2 有效 WFI 使下一状态进入 SWAIT|SWAIT 已寄存后拉 no-op request；四 ack 后 `lpmd_b=00`/clock off；CP0 只由 BIU 回送 `biu_cp0_int_wakeup` 或 event/debug/DTU wake 回 `11`/完成。|
 
 ## 6. 可实施验证合同
 
@@ -271,6 +281,23 @@ function apply_xret(s, kind):
   if kind==MRET: return {pc:s.mepc>>1, pm:s.MPP, MIE:s.MPIE, MPIE:1, MPP:U}
   if kind==SRET: return {pc:s.sepc>>1, pm:{0,s.SPP}, SIE:s.SPIE, SPIE:1, SPP:0}
 
+function apply_concurrent_pm(s, e):
+  # Exact DUT priority, evaluated only when pm_wen is true.
+  if e.exit_debug:  return e.dcsr_prv
+  if e.enter_debug: return e.dbg_pm
+  if e.mret:        return s.MPP
+  if e.sret:        return {0,s.SPP}
+  return S if e.trap && e.mdeleg_vld else M   # RTU trap target
+
+function apply_status_stack(s, e):
+  # Per-bank priority differs from pm: matching trap > xRET > CSR write.
+  M = trap_M(e) ? trap_M_values(s,e) : e.mret ? mret_values(s) : csr_M_values(s,e)
+  S = trap_S(e) ? trap_S_values(s,e) : e.sret ? sret_values(s) : csr_S_values(s,e)
+  return {M,S}
+
+# WFI notification/wake contract: cp0_biu_int_vld = regs_lpmd_int_vld.
+# This notification does not update lpmd_b; model BIU policy separately and
+# require biu_cp0_int_wakeup to return before CP0 exits interrupt low-power.
 # Registered interface rule: request_b(next)=0 iff select_interrupt(current)!=NONE;
 # vec(next)=selected cause iff request asserted, otherwise retain vec(current).
 ```
@@ -292,17 +319,18 @@ function apply_xret(s, kind):
 |D11|D02 后不改变 pending，仅拉 `rtu_cp0_int_ack`|ack pulse|request 仍由源/enable 决定；ack 不清源。|
 |D12|BIU MEI level 置后回落|源回落|pending/request 在后续采样撤销；vec 可保持。|
 |D13|`biu_cp0_ss_int` 置位后回落|CSR 未清|`mvssip` 仍置位；再 CSR clear 才撤销。|
-|D14|RTU 非委托 interrupt vec=0x8b、EPC odd、TVAL|trap valid|M CSR: MEPC bit0=0、MCAUSE、MTVAL，MPP/MPIE/MIE 与表一致。|
+|D14|RTU 非委托**中断** `vec=6'h2b`（`1_01011`，cause 11）、EPC odd、TVAL|trap valid|M CSR: `MCAUSE` 的 interrupt bit=1、cause=11，MEPC bit0=0、MTVAL、MPP/MPIE/MIE 与表一致。|
 |D15|RTU 委托 exception cause=2、S/U|trap valid|S CSR: SEPC bit0=0、SCAUSE=2、STVAL、SPP/SPIE/SIE 与表一致。|
 |D16|MRET/SRET 各设置不同 xPP/xPIE/xIE/xEPC|合法 xRET|mode/IE 恢复、xPIE=1、xPP 清、`efpc=xepc>>1`。|
 |D17|U 发 MRET；S 受 TSR 发 SRET|EX2|IUI local cause=2、opcode MTVAL；不得出现有效 REGS return 更新。|
 |D18|WFI + 四 no-op 未齐|SWAIT|三类 request 均拉、仍不进 LPMD。|
 |D19|WFI + 四 no-op 齐|ack 后|`lpmd_b=00`, `clk_en=0`；分别测试 BIU-int/event/debug/DTU 四 wake 到 `11`。|
-|D20|MIE=0 但 MEIP+MEIE|WFI|`regs_lpmd_int_vld=1` 可唤醒，与 D01 无 trap 并存。|
+|D20|MIE=0 但 MEIP+MEIE，已处 LPMD|先观察 `regs_lpmd_int_vld=1` 与 `cp0_biu_int_vld=1`；按接口模型令 BIU 回送 `biu_cp0_int_wakeup`|通知本身不改变 `lpmd_b`；仅返回 wake 后 `lpmd_b=11`。同时 D01 仍证明无 trap。|
 |D21|ECC select/correctable/fatal 与软件 clear|逐项触发|sticky/clear 及 fatal-to-cause23 受 `ecc_int_vld` 约束。|
-|D22|Debug enter/exit 与同拍 M/S trap/xRET|组合刺激|按 `pm_wen` 源码优先级检查 `pm`，并检查 `cp0_dtu_mexpt_vld`。|
+|D22|Debug enter/exit 与同拍 M/S trap/xRET|组合刺激|按 `exit > enter > MRET > SRET > trap` 检查 `pm`，并检查 `cp0_dtu_mexpt_vld`。|
 |D23|`ADD_AIA` 关闭/开启可用环境|AIA CSR/major src|分别验证 IMSIC bridge 资格、MVIEN/MVIP、MTOPI/STOPI；缺宏则标阻塞，不宣称编译通过。|
-|D24|`mtvec/stvec` mode=2/3 和多 cause|trap entry|观察 VBR mode[1] 清零；下游 offset 未在 CP0 断言，记录集成结果。|
+|D24|`mtvec/stvec` mode=2/3 和多 cause|CSR write/read + trap entry|同时检查 CSR readback 与 `cp0_ifu_vbr` 都强制 mode[1]=0、保留 mode[0]；下游 offset 未在 CP0 断言，记录集成结果。|
+|D25|同拍 `exit_debug/enter_debug/MRET/SRET/trap`，并分别同拍 matching trap+xRET+CSR write|在 `regs_flush_clk` 采样|`pm` 按 `exit > enter > MRET > SRET > trap`；M/S status-stack/trap CSR 各按 matching trap > matching xRET > CSR write。|
 
 ### 6.3 断言/性质描述
 
@@ -318,12 +346,13 @@ function apply_xret(s, kind):
 10. **ack 独立**：在 source/CSR 不变时，仅切换 `rtu_cp0_int_ack` 不改变 pending、选择或撤请求。
 11. **source clear**：外部 level 源撤销后相应 pending 随源变化；`mvssip` 只有 CSR path/reset 才能清除（输入回落不清）。
 12. **非法系统指令**：无 privilege 的 CSR/xRET/WFI 在 EX2 发 cause2+opcode MTVAL，valid 至 flush/下一 EX2 更新前保持。
-13. **WFI wake**：任何四类 wake 使 `lpmd_b` 回 `11`；四 no-op 不全时不得写 `00`。
+13. **WFI wake**：`biu_cp0_int_wakeup`（而非 `regs_lpmd_int_vld/cp0_biu_int_vld` 直接作用）以及 event/debug/DTU 任一 wake 使 `lpmd_b` 回 `11`；四 no-op 不全时不得写 `00`。
 14. **dual-valid 一致性**：若集成规定同拍 valid，任何 `rtu_cp0_expt_vld xor rtu_yy_xx_expt_vld` 都应报接口违例（不是 CP0 已修复的设计结论）。
+15. **并发优先级**：驱动 D25 的所有互斥/重叠组合；`pm` 必须满足 `exit > enter > MRET > SRET > trap`，而 matching M/S status-stack 与 trap CSR 必须满足 trap > xRET > CSR write。
 
 ### 6.4 覆盖与采样/签核
 
-功能覆盖至少包含：`source(8) × pm(M/S/U) × mideleg(0/1) × global-enable(0/1)`（对不适用组合标 ignore）；同时源集合和获胜 slot；`trap_target(M/S) × cause`；MRET/SRET 的 xPP/xPIE 恢复；WFI wake 四类加 `regs_lpmd_int_vld`；ECC {none, correctable, fatal, clear}；AIA {ADD_AIA off/on, IMSIC/major/MTOPI/STOPI}。cross 必须保留 slot13/4 的 illegal bin，命中即失败。
+功能覆盖至少包含：`source(8) × pm(M/S/U) × mideleg(0/1) × global-enable(0/1)`（对不适用组合标 ignore）；同时源集合和获胜 slot；`trap_target(M/S) × cause`；MRET/SRET 的 xPP/xPIE 恢复；WFI 的 CP0→BIU notification 与 BIU→CP0 interrupt wake（加 event/debug/DTU 三类）；ECC {none, correctable, fatal, clear}；AIA {ADD_AIA off/on, IMSIC/major/MTOPI/STOPI}；D25 的并发获胜事件。cross 必须保留 slot13/4 的 illegal bin，命中即失败。
 
 scoreboard 在 `forever_cpuclk` 后采 pending/request/vector，在 `regs_flush_clk` 后采 trap CSR/status/pm，在 IUI EX2/EX3 采本地异常与 xRET，在 `lpmd_b` 常开逻辑后采 wake。静态签核门：合同检查器、链接、diff/check 和人工锚点复核通过。动态签核门：有完整 filelist/宏/外部模块、可执行编译和回归、断言零失败及覆盖目标闭合。当前交付只可满足静态门。
 
@@ -335,7 +364,7 @@ scoreboard 在 `forever_cpuclk` 后采 pending/request/vector，在 `regs_flush_
 2. `cp0_mret/cp0_sret` 类型输出未直接带 `iui_privilege`：确认非法 xRET 的 local exception 不会被 return-type 下游副作用覆盖。
 3. `cp0_expt_vld` 在 flush 或后续 EX2 更新前保持：确认 IU 消费端的有效/flush 合同。
 4. `medeleg` 写掩码可写 bit0、而 cause0 无 one-hot decode：确认 cause0 实际不委托是否为预期。
-5. `mtvec/stvec` 存两位 mode，VBR 仅输出 mode[0]、清 mode[1]：确认非法 vector-mode 的 WARL 可见行为。
+5. `mtvec/stvec` 内部存两位 mode，但 CSR readback 与 VBR 都仅输出 mode[0]、清 mode[1]：确认非法 vector-mode 的 WARL 可见行为。
 6. `rtu_cp0_expt_vld` 与 `rtu_yy_xx_expt_vld` 分别驱动 CSR/status 与 `pm`：确认二者 dual-valid 周期一致性。
 7. `ADD_AIA` 条件 IMSIC bridge 与仓库外 `WK_MAJOR_*` 宏依赖：确认两套配置的 filelist、宏和功能闭合。
 8. `cp0_ifu_vbr` 只给 base/mode：确认 IFU/下游的 vector offset 计算、align 和采样时刻。
@@ -350,7 +379,7 @@ scoreboard 在 `forever_cpuclk` 后采 pending/request/vector，在 `regs_flush_
 |IUI 本地异常与中断 request|`cp0/wk_cp0_iui.v:1967-2054`|
 |status stack/delegation/enable/pending|`cp0/wk_cp0_regs.v:2144-2247`, `:2280-2371`, `:2382-2481`, `:2531-2714`|
 |S trap state|`cp0/wk_cp0_regs.v:2731-2792`, `:2846-2944`|
-|privilege, return, VBR/efpc|`cp0/wk_cp0_regs.v:3207-3268`, `:5006-5014`, `:5145-5186`, `:5574-5579`|
+|privilege, return, VBR/efpc|`cp0/wk_cp0_regs.v:2461-2481`, `:2772-2792`, `:3207-3268`, `:5006-5014`, `:5145-5186`, `:5574-5579`|
 |ECC/AIA|`cp0/wk_cp0_regs.v:3966-4036`, `:5597-6104`|
 |WFI|`cp0/wk_cp0_lpmd.v:161-265`|
 
