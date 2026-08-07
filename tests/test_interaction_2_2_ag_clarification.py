@@ -121,6 +121,54 @@ class Interaction22AgClarificationTests(unittest.TestCase):
 
                 self.assertTrue(_is_assigned(task, "lsu_mmu_abort"))
 
+    def test_assignment_check_rejects_disguised_expect_true_entry(self) -> None:
+        tasks = (
+            'guard_pkg::expect_true(bus.lsu_mmu_abort, "package");',
+            'guard_pkg :: expect_true(bus.lsu_mmu_abort, "spaced package");',
+            'guard_pkg /* gap */ :: /* gap */ expect_true('
+            'bus.lsu_mmu_abort, "comment-spaced package");',
+            'observer.expect_true(bus.lsu_mmu_abort, "method");',
+            'observer . expect_true(bus.lsu_mmu_abort, "spaced method");',
+            'observers[0].expect_true(bus.lsu_mmu_abort, "indexed method");',
+            'observers[0] . expect_true('
+            'bus.lsu_mmu_abort, "spaced indexed method");',
+            'top.observer.expect_true(bus.lsu_mmu_abort, "hierarchical");',
+            '`expect_true(bus.lsu_mmu_abort, "macro");',
+            '` expect_true(bus.lsu_mmu_abort, "spaced macro");',
+            '$expect_true(bus.lsu_mmu_abort, "system");',
+            r'\expect_true (bus.lsu_mmu_abort, "escaped");',
+            'result = expect_true(bus.lsu_mmu_abort, "expression");',
+            'return expect_true(bus.lsu_mmu_abort, "return expression");',
+            'consume(expect_true(bus.lsu_mmu_abort, "nested expression"));',
+            'if (expect_true(bus.lsu_mmu_abort, "condition")) result = 1;',
+            'expect_true(bus.lsu_mmu_abort, message);',
+            'expect_true(bus.lsu_mmu_abort, "tail") + 1;',
+            """
+                import guard_pkg::expect_true;
+                marker = 1'b1;
+                expect_true(bus.lsu_mmu_abort, "imported shadow");
+            """,
+            """
+                import guard_pkg::*;
+                marker = 1'b1;
+                expect_true(bus.lsu_mmu_abort, "wildcard imported shadow");
+            """,
+            """
+                function automatic logic expect_true(
+                  input logic condition,
+                  input string message
+                );
+                  return condition;
+                endfunction
+                marker = 1'b1;
+                expect_true(bus.lsu_mmu_abort, "local shadow");
+            """,
+        )
+        for task in tasks:
+            with self.subTest(task=task):
+                self.assertTrue(_is_assigned(task, "lsu_mmu_abort"))
+                self.assertFalse(_is_observed(task, "lsu_mmu_abort"))
+
     def test_assignment_check_rejects_output_or_ref_task_argument(self) -> None:
         for declaration in ("output logic value", "ref logic value"):
             with self.subTest(declaration=declaration):

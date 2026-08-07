@@ -75,36 +75,81 @@ def _is_observed(scenario: str, signal: str) -> bool:
     return False
 
 
-def _expect_true_predicate_ranges(text: str) -> list[tuple[int, int]]:
-    """Return the parsed first-argument ranges of every complete expect_true call."""
-    ranges: list[tuple[int, int]] = []
-    call_start = 0
+_EXPECT_TRUE_TOKEN = re.compile(
+    r"(?<![A-Za-z0-9_])expect_true(?![A-Za-z0-9_$])"
+)
+_IMPORT_TOKEN = re.compile(r"(?<![A-Za-z0-9_$])import(?![A-Za-z0-9_$])")
+
+
+def _skip_whitespace(text: str, index: int) -> int:
+    while index < len(text) and text[index].isspace():
+        index += 1
+    return index
+
+
+def _previous_non_whitespace(text: str, index: int) -> int:
+    index -= 1
+    while index >= 0 and text[index].isspace():
+        index -= 1
+    return index
+
+
+def _standalone_expect_true_predicate_range(
+    text: str, match: re.Match[str]
+) -> tuple[int, int] | None:
+    """Parse one exact `expect_true(predicate, string);` statement."""
+    previous = _previous_non_whitespace(text, match.start())
+    if previous >= 0 and text[previous] != ";":
+        return None
+
+    opening = _skip_whitespace(text, match.end())
+    if opening >= len(text) or text[opening] != "(":
+        return None
+    predicate_start = opening + 1
     closing = {"(": ")", "[": "]", "{": "}"}
-    while (match := re.search(r"\bexpect_true\s*\(", text[call_start:])) is not None:
-        predicate_start = call_start + match.end()
-        stack: list[str] = []
-        predicate_end: int | None = None
-        for index in range(predicate_start, len(text)):
-            char = text[index]
-            if char in closing:
-                stack.append(closing[char])
-            elif char in closing.values():
-                if stack:
-                    if char != stack.pop():
-                        break
-                elif char == ")":
-                    predicate_end = index
-                    break
-                else:
-                    break
-            elif char == "," and not stack:
-                predicate_end = index
-                break
-        if predicate_end is None:
-            call_start = predicate_start
-            continue
-        ranges.append((predicate_start, predicate_end))
-        call_start = predicate_end + 1
+    stack: list[str] = []
+    predicate_end: int | None = None
+    for index in range(predicate_start, len(text)):
+        char = text[index]
+        if char in closing:
+            stack.append(closing[char])
+        elif char in closing.values():
+            if stack:
+                if char != stack.pop():
+                    return None
+            else:
+                return None
+        elif char == "," and not stack:
+            predicate_end = index
+            break
+    if predicate_end is None:
+        return None
+
+    message_start = _skip_whitespace(text, predicate_end + 1)
+    if message_start >= len(text) or text[message_start] != '"':
+        return None
+    message_end = text.find('"', message_start + 1)
+    if message_end < 0:
+        return None
+    call_closing = _skip_whitespace(text, message_end + 1)
+    if call_closing >= len(text) or text[call_closing] != ")":
+        return None
+    terminator = _skip_whitespace(text, call_closing + 1)
+    if terminator >= len(text) or text[terminator] != ";":
+        return None
+    return predicate_start, predicate_end
+
+
+def _expect_true_predicate_ranges(text: str) -> list[tuple[int, int]]:
+    """Authorize only complete, standalone, unqualified expect_true statements."""
+    if _IMPORT_TOKEN.search(text) is not None:
+        return []
+    ranges: list[tuple[int, int]] = []
+    for match in _EXPECT_TRUE_TOKEN.finditer(text):
+        predicate_range = _standalone_expect_true_predicate_range(text, match)
+        if predicate_range is None:
+            return []
+        ranges.append(predicate_range)
     return ranges
 
 
@@ -134,7 +179,11 @@ def _executable_text(text: str) -> str:
                 else:
                     end += 1
             string = text[index:end]
-            result.append("".join("\n" if char == "\n" else " " for char in string))
+            masked = ["\n" if char == "\n" else " " for char in string]
+            masked[0] = '"'
+            if len(masked) > 1 and string.endswith('"'):
+                masked[-1] = '"'
+            result.append("".join(masked))
             index = end
         else:
             result.append(text[index])
