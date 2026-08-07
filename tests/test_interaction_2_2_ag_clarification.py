@@ -46,6 +46,49 @@ class Interaction22AgClarificationTests(unittest.TestCase):
 
                 self.assertTrue(_is_assigned(task, "lag_ex1_stall_restart_entry"))
 
+    def test_assignment_check_rejects_concatenated_lvalue(self) -> None:
+        task = "{bus.lsu_mmu_abort, spare} = 2'b10;"
+
+        self.assertTrue(_is_assigned(task, "lsu_mmu_abort"))
+
+    def test_assignment_check_rejects_prefix_and_postfix_updates(self) -> None:
+        for task in (
+            "bus.lsu_mmu_abort++;",
+            "bus.lsu_mmu_abort--;",
+            "++bus.lsu_mmu_abort;",
+            "--bus.lsu_mmu_abort;",
+        ):
+            with self.subTest(task=task):
+                self.assertTrue(_is_assigned(task, "lsu_mmu_abort"))
+
+    def test_assignment_check_rejects_assignment_expression_in_predicate(self) -> None:
+        task = "expect_true((bus.lsu_mmu_abort = 1'b1), \"must be high\");"
+
+        self.assertTrue(_is_assigned(task, "lsu_mmu_abort"))
+
+    def test_assignment_check_rejects_output_or_ref_task_argument(self) -> None:
+        for declaration in ("output logic value", "ref logic value"):
+            with self.subTest(declaration=declaration):
+                task = f"""
+                    task automatic mutate({declaration});
+                      value = 1'b1;
+                    endtask
+                    mutate(bus.lsu_mmu_abort);
+                """
+
+                self.assertTrue(_is_assigned(task, "lsu_mmu_abort"))
+
+    def test_assignment_check_allows_nested_observation_predicate(self) -> None:
+        task = """
+            expect_true(
+                (ready && (|bus.lag_ex1_stall_restart_entry[3:0])),
+                "nested predicate"
+            );
+        """
+
+        self.assertFalse(_is_assigned(task, "lag_ex1_stall_restart_entry"))
+        self.assertTrue(_is_observed(task, "lag_ex1_stall_restart_entry"))
+
     def test_assignment_check_ignores_dut_output_names_in_comments_and_strings(self) -> None:
         task = """
             // if (inject_fault) force bus.lag_ex1_stall_restart_entry = '1;

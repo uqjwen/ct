@@ -120,6 +120,16 @@ def _read_sheet(
     archive: ZipFile, path: str, shared: list[str]
 ) -> tuple[dict[int, list[str]], set[str], dict[str, str] | None]:
     root = ET.fromstring(archive.read(path))
+    formula_tag = f"{{{SHEET_NS}}}f"
+    cell_tag = f"{{{SHEET_NS}}}c"
+    for cell in root.iter(cell_tag):
+        reference = cell.attrib.get("r", "<unknown>")
+        if next(cell.iter(formula_tag), None) is not None:
+            raise ValueError(f"formula cell at {reference}")
+        if cell.attrib.get("t") == "e":
+            raise ValueError(f"error cell at {reference}")
+    if next(root.iter(formula_tag), None) is not None:
+        raise ValueError("formula node outside a cell")
     rows: dict[int, list[str]] = {}
     for row in root.findall(f".//{{{SHEET_NS}}}sheetData/{{{SHEET_NS}}}row"):
         row_number = int(row.attrib["r"])

@@ -68,28 +68,44 @@ def _is_driven_with(scenario: str, signal: str, value: str) -> bool:
 
 def _is_observed(scenario: str, signal: str) -> bool:
     executable = _executable_text(scenario)
-    call_start = 0
-    while (match := re.search(r"\bexpect_true\s*\(", executable[call_start:])) is not None:
-        predicate_start = call_start + match.end()
-        depth = 0
-        for index in range(predicate_start, len(executable)):
-            char = executable[index]
-            if char == "(":
-                depth += 1
-            elif char == ")":
-                if depth == 0:
-                    predicate = executable[predicate_start:index]
-                    break
-                depth -= 1
-            elif char == "," and depth == 0:
-                predicate = executable[predicate_start:index]
-                break
-        else:
-            return False
+    for predicate_start, predicate_end in _expect_true_predicate_ranges(executable):
+        predicate = executable[predicate_start:predicate_end]
         if re.search(rf"\b(?:bus|dut)\.{re.escape(signal)}\b", predicate):
             return True
-        call_start = index + 1
     return False
+
+
+def _expect_true_predicate_ranges(text: str) -> list[tuple[int, int]]:
+    """Return the parsed first-argument ranges of every complete expect_true call."""
+    ranges: list[tuple[int, int]] = []
+    call_start = 0
+    closing = {"(": ")", "[": "]", "{": "}"}
+    while (match := re.search(r"\bexpect_true\s*\(", text[call_start:])) is not None:
+        predicate_start = call_start + match.end()
+        stack: list[str] = []
+        predicate_end: int | None = None
+        for index in range(predicate_start, len(text)):
+            char = text[index]
+            if char in closing:
+                stack.append(closing[char])
+            elif char in closing.values():
+                if stack:
+                    if char != stack.pop():
+                        break
+                elif char == ")":
+                    predicate_end = index
+                    break
+                else:
+                    break
+            elif char == "," and not stack:
+                predicate_end = index
+                break
+        if predicate_end is None:
+            call_start = predicate_start
+            continue
+        ranges.append((predicate_start, predicate_end))
+        call_start = predicate_end + 1
+    return ranges
 
 
 def _executable_text(text: str) -> str:
@@ -126,48 +142,25 @@ def _executable_text(text: str) -> str:
     return "".join(result)
 
 
-def _parenthesis_depth(text: str, position: int) -> int:
-    depth = 0
-    for char in text[:position]:
-        if char == "(":
-            depth += 1
-        elif char == ")":
-            depth -= 1
-    return depth
-
-
-def _after_selectors(text: str, position: int) -> int:
-    while True:
-        while position < len(text) and text[position].isspace():
-            position += 1
-        if position == len(text) or text[position] != "[":
-            return position
-        depth = 0
-        while position < len(text):
-            if text[position] == "[":
-                depth += 1
-            elif text[position] == "]":
-                depth -= 1
-                if depth == 0:
-                    position += 1
-                    break
-            position += 1
-        if depth != 0:
-            return len(text)
-
-
 def _is_assigned(task_body: str, signal: str) -> bool:
     executable = _executable_text(task_body)
-    pattern = re.compile(rf"\b(?:(force)\s+)?(?:bus\.|dut\.){re.escape(signal)}\b")
+    predicates = _expect_true_predicate_ranges(executable)
+    pattern = re.compile(rf"\b(?:bus\.|dut\.){re.escape(signal)}\b")
     for match in pattern.finditer(executable):
-        if _parenthesis_depth(executable, match.start()) != 0:
-            continue
-        if match.group(1) is not None:
+        predicate = next(
+            (
+                executable[start:end]
+                for start, end in predicates
+                if start <= match.start() and match.end() <= end
+            ),
+            None,
+        )
+        if predicate is None:
             return True
-        suffix = executable[_after_selectors(executable, match.end()):]
-        if re.match(
-            r"(?:=(?!=)|<=|\+=|-=|\*=|/=|&=|\|=|\^=)",
-            suffix,
+        if re.search(
+            r"(?:\+\+|--|<<<=|>>>=|<<=|>>=|\+=|-=|\*=|/=|%=|&=|\|=|\^="
+            r"|(?<![!<>=])=(?![=>]))",
+            predicate,
         ):
             return True
     return False

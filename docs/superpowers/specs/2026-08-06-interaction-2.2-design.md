@@ -177,6 +177,7 @@ testbench 只观察、不驱动以下 DUT 输出：
 - `waive/interaction_2_2_cp0_code_waiver_manifest.csv`；
 - `waive/08-cp0_代码与功能覆盖率排除列表.xlsx`；
 - `tools/build_interaction_2_2_cp0_waiver.mjs`；
+- `tools/finalize_interaction_2_2_cp0_waiver.py`；
 - `tools/check_interaction_2_2_cp0_waiver.py`；
 - `tests/test_interaction_2_2_ag_clarification.py`；
 - `tests/test_interaction_2_2_cp0_waiver.py`。

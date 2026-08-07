@@ -7,6 +7,7 @@ import unittest
 from collections import Counter
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 from xml.etree import ElementTree as ET
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
@@ -19,6 +20,9 @@ from tools.finalize_interaction_2_2_cp0_waiver import (
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "waive/interaction_2_2_cp0_code_waiver_manifest.csv"
+EXPECTED_MANIFEST = (
+    ROOT / "tests/fixtures/interaction_2_2_cp0_code_waiver_expected.csv"
+)
 FIELDS = (
     "coverage_type", "source_object", "module", "source_section",
     "condition", "reason", "impact", "alternative", "property",
@@ -47,6 +51,11 @@ ZIP_METADATA_FIELDS = (
 
 def read_manifest() -> list[dict[str, str]]:
     with MANIFEST.open(encoding="utf-8", newline="") as stream:
+        return list(csv.DictReader(stream))
+
+
+def read_expected_manifest() -> list[dict[str, str]]:
+    with EXPECTED_MANIFEST.open(encoding="utf-8", newline="") as stream:
         return list(csv.DictReader(stream))
 
 
@@ -98,9 +107,55 @@ def write_finalizer_fixture(path: Path, existing_view: bool = False) -> None:
             archive.writestr(info, payload)
 
 
+def mutate_workbook_sheet(
+    path: Path, mutator, target: str = "xl/worksheets/sheet1.xml"
+) -> None:
+    path.write_bytes(
+        (ROOT / "waive/08-cp0_代码与功能覆盖率排除列表.xlsx").read_bytes()
+    )
+    with ZipFile(path) as archive:
+        archive_comment = archive.comment
+        entries = [
+            (info, archive.read(info.filename)) for info in archive.infolist()
+        ]
+    mutated_entries: list[tuple[ZipInfo, bytes]] = []
+    for info, payload in entries:
+        if info.filename == target:
+            root = ET.fromstring(payload)
+            mutator(root)
+            payload = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+        mutated_entries.append((info, payload))
+    with ZipFile(path, "w") as archive:
+        archive.comment = archive_comment
+        for info, payload in mutated_entries:
+            archive.writestr(info, payload)
+
+
+def add_cell(root: ET.Element, reference: str, cell_type: str, value: str) -> ET.Element:
+    row_number = int("".join(character for character in reference if character.isdigit()))
+    sheet_data = root.find(f"{{{SHEET_NS}}}sheetData")
+    if sheet_data is None:
+        raise AssertionError("fixture worksheet has no sheetData")
+    row = sheet_data.find(f"{{{SHEET_NS}}}row[@r='{row_number}']")
+    if row is None:
+        row = ET.SubElement(sheet_data, f"{{{SHEET_NS}}}row", {"r": str(row_number)})
+    cell = ET.SubElement(
+        row, f"{{{SHEET_NS}}}c", {"r": reference, "t": cell_type}
+    )
+    ET.SubElement(cell, f"{{{SHEET_NS}}}v").text = value
+    return cell
+
+
 class Interaction22Cp0WaiverTests(unittest.TestCase):
     def test_manifest_has_exact_source_contract(self) -> None:
         rows = read_manifest()
+        self.assertTrue(
+            EXPECTED_MANIFEST.is_file(),
+            f"missing reviewed fixture: {EXPECTED_MANIFEST.relative_to(ROOT)}",
+        )
+        expected_rows = read_expected_manifest()
+        self.assertEqual(FIELDS, tuple(expected_rows[0]))
+        self.assertEqual(expected_rows, rows)
         self.assertEqual(45, len(rows))
         self.assertEqual(FIELDS, tuple(rows[0]))
         self.assertEqual(
@@ -128,6 +183,58 @@ class Interaction22Cp0WaiverTests(unittest.TestCase):
     def test_workbook_serializes_two_row_frozen_panes(self) -> None:
         code_rows, function_rows, _ = check_workbook()
         self.assertEqual((45, 0), (code_rows, function_rows))
+
+    def test_workbook_rejects_formula_with_expected_stale_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workbook = Path(directory) / "formula-stale-cache.xlsx"
+
+            def inject_formula(root: ET.Element) -> None:
+                cell = root.find(
+                    f".//{{{SHEET_NS}}}c[@r='A3']"
+                )
+                if cell is None:
+                    raise AssertionError("fixture workbook has no A3 cell")
+                formula = ET.Element(f"{{{SHEET_NS}}}f")
+                formula.text = '"stale expected value"'
+                cell.insert(0, formula)
+
+            mutate_workbook_sheet(workbook, inject_formula)
+            with patch(
+                "tools.check_interaction_2_2_cp0_waiver.WORKBOOK", workbook
+            ):
+                with self.assertRaisesRegex(ValueError, "formula cell at A3"):
+                    check_workbook()
+
+    def test_workbook_rejects_formula_outside_table_with_blank_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workbook = Path(directory) / "formula-outside-table.xlsx"
+
+            def inject_formula(root: ET.Element) -> None:
+                cell = add_cell(root, "Z99", "str", "")
+                formula = ET.Element(f"{{{SHEET_NS}}}f")
+                formula.text = "1+1"
+                cell.insert(0, formula)
+
+            mutate_workbook_sheet(workbook, inject_formula)
+            with patch(
+                "tools.check_interaction_2_2_cp0_waiver.WORKBOOK", workbook
+            ):
+                with self.assertRaisesRegex(ValueError, "formula cell at Z99"):
+                    check_workbook()
+
+    def test_workbook_rejects_error_cell_outside_table_with_blank_value(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workbook = Path(directory) / "error-outside-table.xlsx"
+            mutate_workbook_sheet(
+                workbook,
+                lambda root: add_cell(root, "Z100", "e", ""),
+                target="xl/worksheets/sheet2.xml",
+            )
+            with patch(
+                "tools.check_interaction_2_2_cp0_waiver.WORKBOOK", workbook
+            ):
+                with self.assertRaisesRegex(ValueError, "error cell at Z100"):
+                    check_workbook()
 
 
 class Interaction22Cp0WaiverFinalizerTests(unittest.TestCase):
