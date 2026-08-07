@@ -30,6 +30,15 @@ class Interaction22AgClarificationTests(unittest.TestCase):
 
         self.assertTrue(_is_assigned(task, "lsu_lrq_create_frz"))
 
+    def test_assignment_check_rejects_noncanonical_target_spelling(self) -> None:
+        for task in (
+            "expect_true(bus . lsu_mmu_abort, \"spaced target\");",
+            r'expect_true(bus.\lsu_mmu_abort , "escaped target");',
+        ):
+            with self.subTest(task=task):
+                self.assertTrue(_is_assigned(task, "lsu_mmu_abort"))
+                self.assertFalse(_is_observed(task, "lsu_mmu_abort"))
+
     def test_assignment_check_rejects_conditional_dut_output_select_drive(self) -> None:
         for select in (
             "[0]",
@@ -92,6 +101,26 @@ class Interaction22AgClarificationTests(unittest.TestCase):
 
                 self.assertTrue(_is_assigned(task, "lsu_mmu_abort"))
 
+    def test_assignment_check_rejects_macro_or_indexed_target_call(self) -> None:
+        for call in (
+            "`MUTATE(bus.lsu_mmu_abort)",
+            "callbacks[0](bus.lsu_mmu_abort)",
+        ):
+            with self.subTest(call=call):
+                task = f'expect_true({call}, "nested call");'
+
+                self.assertTrue(_is_assigned(task, "lsu_mmu_abort"))
+
+    def test_assignment_check_rejects_escaped_user_or_method_call(self) -> None:
+        for call in (
+            r"\mutate! (bus.lsu_mmu_abort)",
+            r"observer.\mutate! (bus.lsu_mmu_abort)",
+        ):
+            with self.subTest(call=call):
+                task = f'expect_true({call}, "escaped nested call");'
+
+                self.assertTrue(_is_assigned(task, "lsu_mmu_abort"))
+
     def test_assignment_check_rejects_output_or_ref_task_argument(self) -> None:
         for declaration in ("output logic value", "ref logic value"):
             with self.subTest(declaration=declaration):
@@ -104,10 +133,43 @@ class Interaction22AgClarificationTests(unittest.TestCase):
 
                 self.assertTrue(_is_assigned(task, "lsu_mmu_abort"))
 
-    def test_assignment_check_allows_nested_observation_predicate(self) -> None:
+    def test_assignment_check_rejects_unknown_predicate_identifier(self) -> None:
+        for predicate in (
+            "bus.lsu_mmu_abort && ready",
+            "bus.lsu_mmu_abort & bus.some_other_signal",
+        ):
+            with self.subTest(predicate=predicate):
+                task = f'expect_true({predicate}, "unknown syntax");'
+
+                self.assertTrue(_is_assigned(task, "lsu_mmu_abort"))
+                self.assertFalse(_is_observed(task, "lsu_mmu_abort"))
+
+    def test_assignment_check_rejects_identifier_selector(self) -> None:
+        for select in (
+            "[index]",
+            "[index +: 4]",
+            r"[\lane ]",
+            "[`LANE]",
+            "[pick(0)]",
+        ):
+            with self.subTest(select=select):
+                task = (
+                    "expect_true("
+                    f"bus.lag_ex1_stall_restart_entry{select}, "
+                    '"non-constant selector");'
+                )
+
+                self.assertTrue(
+                    _is_assigned(task, "lag_ex1_stall_restart_entry")
+                )
+                self.assertFalse(
+                    _is_observed(task, "lag_ex1_stall_restart_entry")
+                )
+
+    def test_assignment_check_allows_nested_reduction_predicate(self) -> None:
         task = """
             expect_true(
-                (ready && (|bus.lag_ex1_stall_restart_entry[3:0])),
+                (((|bus.lag_ex1_stall_restart_entry[3:0]))),
                 "nested predicate"
             );
         """
@@ -118,13 +180,46 @@ class Interaction22AgClarificationTests(unittest.TestCase):
     def test_assignment_check_allows_grouping_parentheses_only(self) -> None:
         task = """
             expect_true(
-                ((((bus.lsu_mmu_abort))) && ready),
+                ((((bus.lsu_mmu_abort)))),
                 "grouped observation"
             );
         """
 
         self.assertFalse(_is_assigned(task, "lsu_mmu_abort"))
         self.assertTrue(_is_observed(task, "lsu_mmu_abort"))
+
+    def test_assignment_check_allows_direct_and_unary_not_observation(self) -> None:
+        for predicate, signal in (
+            ("bus.lsu_mmu_abort", "lsu_mmu_abort"),
+            ("!bus.lsu_lrq_create_frz", "lsu_lrq_create_frz"),
+        ):
+            with self.subTest(predicate=predicate):
+                task = f'expect_true({predicate}, "read-only observation");'
+
+                self.assertFalse(_is_assigned(task, signal))
+                self.assertTrue(_is_observed(task, signal))
+
+    def test_assignment_check_allows_numeric_vector_selections(self) -> None:
+        for select in (
+            "[0]",
+            "[3:0]",
+            "[4 +: 4]",
+            "[7 -: 4]",
+            "[4'd3:1'b0]",
+        ):
+            with self.subTest(select=select):
+                task = (
+                    "expect_true("
+                    f"|bus.lag_ex1_stall_restart_entry{select}, "
+                    '"constant selection");'
+                )
+
+                self.assertFalse(
+                    _is_assigned(task, "lag_ex1_stall_restart_entry")
+                )
+                self.assertTrue(
+                    _is_observed(task, "lag_ex1_stall_restart_entry")
+                )
 
     def test_assignment_check_ignores_dut_output_names_in_comments_and_strings(self) -> None:
         task = """
