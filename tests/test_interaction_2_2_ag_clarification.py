@@ -2,7 +2,10 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest import mock
 
+import tools.check_interaction_2_2_ag_boundary as ag_boundary
 from tools.check_interaction_2_2_ag_boundary import _is_assigned, _is_observed
 
 
@@ -19,6 +22,73 @@ class Interaction22AgClarificationTests(unittest.TestCase):
         )
         self.assertEqual(0, completed.returncode, completed.stderr)
         self.assertIn("AG_FP05_DUT_BOUNDARY_PASS inputs=4 outputs=3", completed.stdout)
+
+    def test_checker_requires_unique_canonical_expect_true_helper(self) -> None:
+        original = ag_boundary.TB.read_text(encoding="utf-8")
+        canonical = (
+            "task automatic expect_true("
+            "input logic condition, input string message);"
+        )
+        mutations = {
+            "missing": original.replace(
+                canonical,
+                "task automatic expect_false("
+                "input logic condition, input string message);",
+                1,
+            ),
+            "output first argument": original.replace(
+                canonical,
+                "task automatic expect_true("
+                "output logic condition, input string message);",
+                1,
+            ),
+            "ref first argument": original.replace(
+                canonical,
+                "task automatic expect_true("
+                "ref logic condition, input string message);",
+                1,
+            ),
+            "function": original.replace(
+                canonical,
+                "function automatic logic expect_true("
+                "input logic condition, input string message);",
+                1,
+            ),
+            "duplicate": original.replace(
+                "  task automatic record_known_finding(",
+                f"  {canonical}\n  endtask\n\n"
+                "  task automatic record_known_finding(",
+                1,
+            ),
+        }
+        for label, mutated in mutations.items():
+            with self.subTest(label=label), TemporaryDirectory() as directory:
+                tb = Path(directory) / "xx_lsu_ld_ag_tb.sv"
+                tb.write_text(mutated, encoding="utf-8")
+                with mock.patch.object(ag_boundary, "TB", tb):
+                    with self.assertRaisesRegex(ValueError, "expect_true helper"):
+                        ag_boundary.check()
+
+    def test_assignment_check_rejects_expect_true_in_for_clauses(self) -> None:
+        tasks = (
+            'for (i = 0; expect_true(bus.lsu_mmu_abort, "condition"); i++) '
+            'begin end',
+            """
+                for (
+                  i = 0;
+                  expect_true(bus.lsu_mmu_abort, "multiline condition");
+                  i++
+                ) begin end
+            """,
+            'for (expect_true(bus.lsu_mmu_abort, "init"); i < 4; i++) '
+            'begin end',
+            'for (i = 0; i < 4; expect_true('
+            'bus.lsu_mmu_abort, "increment")) begin end',
+        )
+        for task in tasks:
+            with self.subTest(task=task):
+                self.assertTrue(_is_assigned(task, "lsu_mmu_abort"))
+                self.assertFalse(_is_observed(task, "lsu_mmu_abort"))
 
     def test_assignment_check_rejects_conditional_dut_output_drive(self) -> None:
         task = "if (inject_fault) bus.lsu_mmu_abort = 1'b1;"

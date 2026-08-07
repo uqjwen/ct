@@ -79,6 +79,12 @@ _EXPECT_TRUE_TOKEN = re.compile(
     r"(?<![A-Za-z0-9_])expect_true(?![A-Za-z0-9_$])"
 )
 _IMPORT_TOKEN = re.compile(r"(?<![A-Za-z0-9_$])import(?![A-Za-z0-9_$])")
+_CANONICAL_EXPECT_TRUE_HELPER = re.compile(
+    r"task\s+automatic\s+expect_true\s*\(\s*"
+    r"input\s+logic\s+condition\s*,\s*"
+    r"input\s+string\s+message\s*\)\s*",
+    flags=re.DOTALL,
+)
 
 
 def _skip_whitespace(text: str, index: int) -> int:
@@ -92,6 +98,24 @@ def _previous_non_whitespace(text: str, index: int) -> int:
     while index >= 0 and text[index].isspace():
         index -= 1
     return index
+
+
+def _top_level_offsets(text: str) -> set[int] | None:
+    """Return offsets outside balanced (), [], and {} delimiters."""
+    closing = {"(": ")", "[": "]", "{": "}"}
+    stack: list[str] = []
+    top_level: set[int] = set()
+    for index, char in enumerate(text):
+        if not stack:
+            top_level.add(index)
+        if char in closing:
+            stack.append(closing[char])
+        elif char in closing.values():
+            if not stack or char != stack.pop():
+                return None
+    if stack:
+        return None
+    return top_level
 
 
 def _standalone_expect_true_predicate_range(
@@ -144,8 +168,13 @@ def _expect_true_predicate_ranges(text: str) -> list[tuple[int, int]]:
     """Authorize only complete, standalone, unqualified expect_true statements."""
     if _IMPORT_TOKEN.search(text) is not None:
         return []
+    top_level = _top_level_offsets(text)
+    if top_level is None:
+        return []
     ranges: list[tuple[int, int]] = []
     for match in _EXPECT_TRUE_TOKEN.finditer(text):
+        if match.start() not in top_level:
+            return []
         predicate_range = _standalone_expect_true_predicate_range(text, match)
         if predicate_range is None:
             return []
@@ -327,10 +356,42 @@ def _is_assigned(task_body: str, signal: str) -> bool:
     return False
 
 
+def _validate_expect_true_helper(tb_text: str) -> None:
+    """Require one canonical, input-only expect_true task in the TB module."""
+    executable = _executable_text(tb_text)
+    modules = list(
+        re.finditer(
+            r"\bmodule\s+xx_lsu_ld_ag_tb\b[^;]*;(?P<body>.*?)\bendmodule\b",
+            executable,
+            flags=re.DOTALL,
+        )
+    )
+    if len(modules) != 1:
+        raise ValueError("expect_true helper requires one xx_lsu_ld_ag_tb module")
+    module_body = modules[0].group("body")
+    declarations: list[str] = []
+    for declaration in re.finditer(r"\b(?:task|function)\b", module_body):
+        header_end = module_body.find(";", declaration.start())
+        if header_end < 0:
+            raise ValueError("expect_true helper declaration is unterminated")
+        header = module_body[declaration.start():header_end]
+        if _EXPECT_TRUE_TOKEN.search(header) is not None:
+            declarations.append(header)
+    if len(declarations) != 1:
+        raise ValueError(
+            "expect_true helper must have exactly one task/function declaration"
+        )
+    if _CANONICAL_EXPECT_TRUE_HELPER.fullmatch(declarations[0]) is None:
+        raise ValueError(
+            "expect_true helper must be task automatic with two input by-value ports"
+        )
+
+
 def check() -> None:
     rtl_text = RTL.read_text(encoding="utf-8")
     tb_text = TB.read_text(encoding="utf-8")
     assertions_text = ASSERTIONS.read_text(encoding="utf-8")
+    _validate_expect_true_helper(tb_text)
     task_body = _task_body(tb_text, "tc_stall_restart_owner")
     scenario = _scenario_body(task_body)
 
