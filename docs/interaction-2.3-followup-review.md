@@ -16,11 +16,12 @@
 |CP0 单元/变异测试|`python3 -m unittest tests.test_interaction_2_3_cp0_contract -v`|6 tests，0 failures，`OK`|
 |全仓 Python 单元测试|`python3 -m unittest discover -s tests -v`|83 tests，0 failures，`OK`|
 |既有 LSU preflight|`make -C verif/common preflight`|7 environments、85 features、534 scenarios；`LSU_PREFLIGHT_PASS` 与 `INTERACTION_2_1_PREFLIGHT_PASS`|
-|空白错误|`git diff --check`|exit 0，无输出|
+|历史 Task 3 whitespace 覆盖|`git diff --check 74d5cc8..4e727930293c00d32c50b70372aabee9274e5773`|exit 0，无输出；覆盖前一 Task 3 报告提交相对其父提交的 diff|
+|当前报告修订 whitespace 覆盖|`git diff --cached --check`|本修订暂存后重跑；exit 0、无输出，覆盖本次暂存的报告修订|
 |生产范围|`git diff 473b3c2...HEAD -- cp0 srcs README.md`|exit 0，无输出（0 个 CP0/`srcs`/README 变更）|
 |分支状态（创建本报告前）|`git status --short --branch`|`## review/interaction-2.3-v1`；clean baseline，无工作树条目|
 
-合同 marker 证明检查器从当前四个 RTL 文件抽取并核对：四模块/三子模块拓扑、八类中断源、15 个优先级槽（13 live）、12 个有效异常委托 cause、以及 `rtu_cp0_int_ack` 的 0 个语义消费者。它不证明外部宏、完整 CP0 filelist、上游/下游接口时序或动态行为。
+合同 marker 证明检查器从当前四个 RTL 文件抽取并核对四模块/三子模块拓扑、八类中断源、15 个优先级槽（13 live）和 12 个有效异常委托 cause。对 `ack_consumers=0`，其证明范围更窄：检查器只在已解析的 `wk_cp0_regs` module body 中去除声明后，计数 `rtu_cp0_int_ack` 标识符出现次数为 0；它本身不证明四个文件中语义上没有消费者，也不证明顶层连通性。任何更广的“无消费者”观察仅是人工静态检查，仍须由系统集成和动态测试确认。它不证明外部宏、完整 CP0 filelist、上游/下游接口时序或动态行为。
 
 ## 链接和源码锚点审计
 
@@ -28,7 +29,46 @@
 
 同时对详细设计每个一级章节至少抽样一个已列出的 RTL 锚点，并以当前文件行号读取：§1 `wk_cp0_top.v:1042`、§2 `wk_cp0_iui.v:1406`、§3 `wk_cp0_regs.v:2646`、§4 `wk_cp0_regs.v:2144`、§5 `wk_cp0_lpmd.v:161`、§6 `wk_cp0_iui.v:2004`、§7 `wk_cp0_regs.v:3207`、§8 `wk_cp0_regs.v:5597`。8/8 样本均在当前文件范围内且为非空 RTL 行；此审计只确认定位与源码可读，不能替代语义仿真。
 
-可复跑的只读审计逻辑见本任务执行证据；其输入是本文和详细设计，且不写入仓库文件。
+从仓库根目录执行以下只读 Python 标准库命令，可重跑链接和锚点审计；它同时覆盖本文和详细设计，且不写入仓库文件：
+
+```bash
+python3 - <<'PY'
+from pathlib import Path
+import re
+
+root = Path.cwd().resolve()
+documents = [
+    root / 'doc-cp0/wk_cp0_system_interrupt_exception_detailed_design.md',
+    root / 'docs/interaction-2.3-followup-review.md',
+]
+links = []
+for document in documents:
+    for target in re.findall(r'(?<!!)\[[^\]]*\]\(([^)]+)\)', document.read_text(encoding='utf-8')):
+        target = target.strip().split(maxsplit=1)[0].strip('<>')
+        if '://' in target or target.startswith('#'):
+            continue
+        resolved = (document.parent / target).resolve()
+        if (root not in resolved.parents and resolved != root) or not resolved.exists():
+            raise SystemExit(f'LINK_AUDIT_FAIL {document.relative_to(root)}:{target}')
+        links.append((document, target))
+anchors = [
+    ('section1', 'cp0/wk_cp0_top.v', 1042),
+    ('section2', 'cp0/wk_cp0_iui.v', 1406),
+    ('section3', 'cp0/wk_cp0_regs.v', 2646),
+    ('section4', 'cp0/wk_cp0_regs.v', 2144),
+    ('section5', 'cp0/wk_cp0_lpmd.v', 161),
+    ('section6', 'cp0/wk_cp0_iui.v', 2004),
+    ('section7', 'cp0/wk_cp0_regs.v', 3207),
+    ('section8', 'cp0/wk_cp0_regs.v', 5597),
+]
+for section, relpath, line in anchors:
+    source_lines = (root / relpath).read_text(encoding='utf-8').splitlines()
+    if line > len(source_lines) or not source_lines[line - 1].strip():
+        raise SystemExit(f'ANCHOR_AUDIT_FAIL {section} {relpath}:{line}')
+print(f'LINK_AUDIT_PASS documents={len(documents)} repository_relative_links={len(links)} resolved={len(links)}')
+print(f'ANCHOR_AUDIT_PASS samples={len(anchors)} valid={len(anchors)}')
+PY
+```
 
 ## 动态签核边界与待集成问题
 
