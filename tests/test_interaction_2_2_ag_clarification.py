@@ -69,6 +69,66 @@ class Interaction22AgClarificationTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "expect_true helper"):
                         ag_boundary.check()
 
+    def test_checker_rejects_expect_true_helper_body_mutations(self) -> None:
+        original = ag_boundary.TB.read_text(encoding="utf-8")
+        fatal = '      $fatal(1, "CHECK_FAIL: %s", message);'
+        mutations = {
+            "direct assignment": original.replace(
+                "    checks_run++;",
+                "    bus.lsu_mmu_abort = 1'b1;\n    checks_run++;",
+                1,
+            ),
+            "force": original.replace(
+                "    checks_run++;",
+                "    force bus.lsu_mmu_abort = 1'b1;\n    checks_run++;",
+                1,
+            ),
+            "call through": original.replace(
+                "    checks_run++;",
+                "    mutate(bus.lsu_mmu_abort);\n    checks_run++;",
+                1,
+            ),
+            "additional side effect": original.replace(
+                "    checks_run++;",
+                "    known_findings++;\n    checks_run++;",
+                1,
+            ),
+            "comment fake endtask before mutation": original.replace(
+                fatal,
+                f"{fatal}\n    // endtask\n"
+                "    force bus.lsu_mmu_abort = 1'b1;",
+                1,
+            ),
+            "escaped identifier fake endtask before mutation": original.replace(
+                fatal,
+                f"{fatal}\n    \\endtask \n"
+                "    force bus.lsu_mmu_abort = 1'b1;",
+                1,
+            ),
+        }
+        for label, mutated in mutations.items():
+            with self.subTest(label=label), TemporaryDirectory() as directory:
+                tb = Path(directory) / "xx_lsu_ld_ag_tb.sv"
+                tb.write_text(mutated, encoding="utf-8")
+                with mock.patch.object(ag_boundary, "TB", tb):
+                    with self.assertRaisesRegex(
+                        ValueError, "expect_true helper body"
+                    ):
+                        ag_boundary.check()
+
+    def test_checker_allows_helper_comments_and_message_text_change(self) -> None:
+        original = ag_boundary.TB.read_text(encoding="utf-8")
+        modified = original.replace(
+            "    checks_run++;",
+            "    /* accounting */ checks_run /* increment */ ++;",
+            1,
+        ).replace("CHECK_FAIL: %s", "observation failed: %s", 1)
+        with TemporaryDirectory() as directory:
+            tb = Path(directory) / "xx_lsu_ld_ag_tb.sv"
+            tb.write_text(modified, encoding="utf-8")
+            with mock.patch.object(ag_boundary, "TB", tb):
+                ag_boundary.check()
+
     def test_assignment_check_rejects_expect_true_in_for_clauses(self) -> None:
         tasks = (
             'for (i = 0; expect_true(bus.lsu_mmu_abort, "condition"); i++) '
@@ -84,6 +144,13 @@ class Interaction22AgClarificationTests(unittest.TestCase):
             'begin end',
             'for (i = 0; i < 4; expect_true('
             'bus.lsu_mmu_abort, "increment")) begin end',
+            r"""
+                for (
+                  \init) ;
+                  expect_true(bus.lsu_mmu_abort, "escaped delimiter");
+                  \increment(
+                ) begin end
+            """,
         )
         for task in tasks:
             with self.subTest(task=task):

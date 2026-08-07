@@ -85,6 +85,12 @@ _CANONICAL_EXPECT_TRUE_HELPER = re.compile(
     r"input\s+string\s+message\s*\)\s*",
     flags=re.DOTALL,
 )
+_CANONICAL_EXPECT_TRUE_BODY = re.compile(
+    r"\s*checks_run\s*\+\+\s*;\s*"
+    r"if\s*\(\s*condition\s*!==\s*1'b1\s*\)\s*"
+    r"\$fatal\s*\(\s*1\s*,\s*\"[^\"]*\"\s*,\s*message\s*\)\s*;\s*",
+    flags=re.DOTALL,
+)
 
 
 def _skip_whitespace(text: str, index: int) -> int:
@@ -105,14 +111,22 @@ def _top_level_offsets(text: str) -> set[int] | None:
     closing = {"(": ")", "[": "]", "{": "}"}
     stack: list[str] = []
     top_level: set[int] = set()
-    for index, char in enumerate(text):
+    index = 0
+    while index < len(text):
         if not stack:
             top_level.add(index)
+        char = text[index]
+        if char == "\\":
+            index += 1
+            while index < len(text) and not text[index].isspace():
+                index += 1
+            continue
         if char in closing:
             stack.append(closing[char])
         elif char in closing.values():
             if not stack or char != stack.pop():
                 return None
+        index += 1
     if stack:
         return None
     return top_level
@@ -357,7 +371,7 @@ def _is_assigned(task_body: str, signal: str) -> bool:
 
 
 def _validate_expect_true_helper(tb_text: str) -> None:
-    """Require one canonical, input-only expect_true task in the TB module."""
+    """Require one canonical, input-only, read-only expect_true task."""
     executable = _executable_text(tb_text)
     modules = list(
         re.finditer(
@@ -369,21 +383,33 @@ def _validate_expect_true_helper(tb_text: str) -> None:
     if len(modules) != 1:
         raise ValueError("expect_true helper requires one xx_lsu_ld_ag_tb module")
     module_body = modules[0].group("body")
-    declarations: list[str] = []
+    declarations: list[tuple[str, int]] = []
     for declaration in re.finditer(r"\b(?:task|function)\b", module_body):
         header_end = module_body.find(";", declaration.start())
         if header_end < 0:
             raise ValueError("expect_true helper declaration is unterminated")
         header = module_body[declaration.start():header_end]
         if _EXPECT_TRUE_TOKEN.search(header) is not None:
-            declarations.append(header)
+            declarations.append((header, header_end))
     if len(declarations) != 1:
         raise ValueError(
             "expect_true helper must have exactly one task/function declaration"
         )
-    if _CANONICAL_EXPECT_TRUE_HELPER.fullmatch(declarations[0]) is None:
+    header, header_end = declarations[0]
+    if _CANONICAL_EXPECT_TRUE_HELPER.fullmatch(header) is None:
         raise ValueError(
             "expect_true helper must be task automatic with two input by-value ports"
+        )
+    body_start = header_end + 1
+    endtask = re.search(r"\bendtask\b", module_body[body_start:])
+    if endtask is None:
+        raise ValueError("expect_true helper body is missing endtask")
+    body_end = body_start + endtask.start()
+    if _CANONICAL_EXPECT_TRUE_BODY.fullmatch(
+        module_body[body_start:body_end]
+    ) is None:
+        raise ValueError(
+            "expect_true helper body must match the approved read-only contract"
         )
 
 
