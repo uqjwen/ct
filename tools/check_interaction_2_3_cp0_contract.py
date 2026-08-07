@@ -39,6 +39,14 @@ EXPECTED_SLOTS = [
     "ssip_deleg_vld", "stip_deleg_vld", "moip_deleg_vld",
 ]
 EXPECTED_CAUSES = [23, 18, 11, 3, 7, 9, 1, 5, 13, 23, 18, 9, 1, 5, 13]
+EXPECTED_SELECTORS = [
+    "1??????????????", "01?????????????", "001????????????",
+    "0001???????????", "00001??????????", "000001?????????",
+    "0000001????????", "00000001???????", "000000001??????",
+    "0000000001?????", "00000000001????", "000000000001???",
+    "0000000000001??", "00000000000001?", "000000000000001",
+]
+CHECKED_ASSIGNMENTS = frozenset({*EXPECTED_SOURCES, "int_sel", "edeleg_upd_val"})
 
 
 class ContractError(ValueError):
@@ -77,6 +85,8 @@ def _assignments(source: str) -> dict[str, str]:
         flags=re.DOTALL,
     ):
         name = match.group(1)
+        if name in assignments and name in CHECKED_ASSIGNMENTS:
+            raise ContractError(f"duplicate assignment for checked signal: {name}")
         assignments.setdefault(name, _normalize(match.group(2)))
     return assignments
 
@@ -115,7 +125,7 @@ def _topology(top: str) -> list[str]:
     return list(actual)
 
 
-def _interrupt_priority(iui: str) -> tuple[list[int], list[bool]]:
+def _interrupt_priority(iui: str) -> tuple[list[str], list[int], list[bool]]:
     match = re.search(
         r"\bcasez\s*\(\s*regs_iui_int_sel\s*\[\s*14\s*:\s*0\s*\]\s*\)"
         r"(?P<body>.*?)\bendcase\b",
@@ -125,15 +135,18 @@ def _interrupt_priority(iui: str) -> tuple[list[int], list[bool]]:
     if match is None:
         raise ContractError("interrupt priority casez is missing")
     rows = re.findall(
-        r"15\s*'\s*b\s*[01?]{15}\s*:\s*valid_int_vec\s*\[\s*4\s*:\s*0\s*\]"
+        r"15\s*'\s*b\s*([01?]{15})\s*:\s*valid_int_vec\s*\[\s*4\s*:\s*0\s*\]"
         r"\s*=\s*5\s*'\s*d\s*(\d+)\s*;",
         match.group("body"),
         flags=re.IGNORECASE,
     )
-    causes = [int(row) for row in rows]
-    if causes != EXPECTED_CAUSES:
-        raise ContractError(f"interrupt priority differs: {causes}")
-    return causes, [slot != "1'b0" for slot in EXPECTED_SLOTS]
+    selectors = [selector for selector, _ in rows]
+    causes = [int(cause) for _, cause in rows]
+    if selectors != EXPECTED_SELECTORS or causes != EXPECTED_CAUSES:
+        raise ContractError(
+            f"interrupt priority differs: selectors={selectors} causes={causes}"
+        )
+    return selectors, causes, [slot != "1'b0" for slot in EXPECTED_SLOTS]
 
 
 def _term_width(term: str) -> tuple[set[int], int]:
@@ -282,12 +295,12 @@ def check_contract(root: Path = ROOT) -> dict[str, object]:
     slots = _split_concatenation(assignments.get("int_sel", ""))
     if slots != EXPECTED_SLOTS:
         raise ContractError(f"interrupt select slots differ: {slots}")
-    causes, live = _interrupt_priority(sources["wk_cp0_iui"])
+    selectors, causes, live = _interrupt_priority(sources["wk_cp0_iui"])
     return {
         "modules": list(MODULE_FILES),
         "top_submodules": top_submodules,
         "interrupt_sources": interrupt_sources,
-        "interrupt_priority": {"causes": causes, "live": live},
+        "interrupt_priority": {"selectors": selectors, "causes": causes, "live": live},
         "delegable_exceptions": _delegable_exceptions(sources["wk_cp0_regs"], assignments),
         "ack_consumers": _ack_consumers(sources["wk_cp0_regs"]),
         "key_paths": _key_paths(

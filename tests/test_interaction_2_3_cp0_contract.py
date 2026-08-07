@@ -60,6 +60,16 @@ class Interaction23Cp0ContractTests(unittest.TestCase):
         )
         self.assertEqual(
             [
+                "1??????????????", "01?????????????", "001????????????",
+                "0001???????????", "00001??????????", "000001?????????",
+                "0000001????????", "00000001???????", "000000001??????",
+                "0000000001?????", "00000000001????", "000000000001???",
+                "0000000000001??", "00000000000001?", "000000000000001",
+            ],
+            payload["interrupt_priority"]["selectors"],
+        )
+        self.assertEqual(
+            [
                 True, False, True, True, True, True, True, True, True,
                 True, False, True, True, True, True,
             ],
@@ -82,6 +92,26 @@ class Interaction23Cp0ContractTests(unittest.TestCase):
                 contents.replace(
                     "15'b1?????????????? : valid_int_vec[4:0] = 5'd23;",
                     "15'b1?????????????? : valid_int_vec[4:0] = 5'd22;",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+
+            completed = self.run_checker("--root", str(root))
+
+        self.assertNotEqual(0, completed.returncode)
+        self.assertIn("priority", completed.stderr.lower())
+
+    def test_rejects_interrupt_priority_selector_drift(self) -> None:
+        temporary, root = self.temporary_cp0_root()
+        with temporary:
+            iui = root / "cp0/wk_cp0_iui.v"
+            contents = iui.read_text(encoding="utf-8")
+            self.assertIn("15'b1?????????????? : valid_int_vec[4:0] = 5'd23;", contents)
+            iui.write_text(
+                contents.replace(
+                    "15'b1?????????????? : valid_int_vec[4:0] = 5'd23;",
+                    "15'b01????????????? : valid_int_vec[4:0] = 5'd23;",
                     1,
                 ),
                 encoding="utf-8",
@@ -129,6 +159,24 @@ class Interaction23Cp0ContractTests(unittest.TestCase):
 
         self.assertNotEqual(0, completed.returncode)
         self.assertIn("ack-consumer", completed.stderr.lower())
+
+    def test_rejects_duplicate_checked_interrupt_source_assignment(self) -> None:
+        temporary, root = self.temporary_cp0_root()
+        with temporary:
+            regs = root / "cp0/wk_cp0_regs.v"
+            contents = regs.read_text(encoding="utf-8")
+            self.assertIn("endmodule", contents)
+            regs.write_text(
+                contents.rsplit("endmodule", 1)[0]
+                + "assign meip = 1'b0;\nendmodule"
+                + contents.rsplit("endmodule", 1)[1],
+                encoding="utf-8",
+            )
+
+            completed = self.run_checker("--root", str(root))
+
+        self.assertNotEqual(0, completed.returncode)
+        self.assertIn("duplicate assignment", completed.stderr.lower())
 
 
 if __name__ == "__main__":
