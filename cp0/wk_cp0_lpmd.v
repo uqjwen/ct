@@ -1,0 +1,270 @@
+//-----------------------------------------------------------------------------
+// File          : wk_cp0_lpmd.v
+// Created       : 2024/10/01 (by David)
+// Last modified : 2024/10/01 (by David)
+// Version       : s1.0 (##s means single file version, 
+//                       to avoid conflicts with the whole project version)
+//-----------------------------------------------------------------------------
+// Description :
+//  This block contains the TBD.
+//-----------------------------------------------------------------------------
+// Copyright (c) 2023 CHUXIN Team.  All rights reserved.
+// This model is the confidential and proprietary property of CHUXIN team and the possession or use of this
+// file requires a written license from CHUXIN team. This work may not be copied, modified, re-published, uploaded, executed,
+// or distributed in any way, in any medium, whether in whole or in part, without prior written permission from CHUXIN Team.
+//-----------------------------------------------------------------------------
+// Modification history :
+// 2024/10/01 : Created
+// 2024/XX/XX : 
+//-----------------------------------------------------------------------------
+
+//#
+//# Module Declaration
+//# ==================
+//#
+
+
+// $Id: wk_cp0_lpmd.vp,v 1.18 2022/01/21 13:56:26 jizk Exp $
+// *****************************************************************************
+
+// &ModuleBeg; @24
+module wk_cp0_lpmd(
+  biu_cp0_event_wakeup,
+  biu_cp0_int_wakeup,
+  biu_yy_xx_no_op,
+  cp0_biu_int_vld,
+  cp0_biu_lpmd_b,
+  cp0_ifu_no_op_req,
+  cp0_lsu_no_op_req,
+  cp0_mmu_no_op_req,
+  cp0_yy_clk_en,
+  cpurst_b,
+  forever_cpuclk,
+  ifu_yy_xx_no_op,
+  inst_lpmd_ex1_ex2,
+  rtu_ck_flush_older_than_ex1,
+  lpmd_cmplt,
+  lpmd_top_cur_state,
+  lsu_yy_xx_no_op,
+  mmu_yy_xx_no_op,
+  pad_yy_icg_scan_en,
+  regs_lpmd_int_vld,
+  regs_xx_icg_en,
+  rtu_yy_xx_dbgon,
+  rtu_yy_xx_flush,
+  rtu_ck_flush,
+//==========================================================
+//                  Risc-V Debug zdb Begin
+//==========================================================
+  dtu_cp0_wake_up
+//==========================================================
+//                  Risc-V Debug zdb End
+//==========================================================
+);
+
+// &Ports; @25
+input          biu_cp0_event_wakeup; 
+input          biu_cp0_int_wakeup;  
+input          biu_yy_xx_no_op;     
+input          cpurst_b;            
+input          forever_cpuclk;          
+input          ifu_yy_xx_no_op;     
+input          inst_lpmd_ex1_ex2;   
+input          rtu_ck_flush_older_than_ex1;
+input          lsu_yy_xx_no_op;     
+input          mmu_yy_xx_no_op;     
+input          pad_yy_icg_scan_en;  
+input          regs_lpmd_int_vld;   
+input          regs_xx_icg_en;      
+input          rtu_yy_xx_dbgon;     
+input          rtu_yy_xx_flush;     
+input          rtu_ck_flush;
+output         cp0_biu_int_vld;     
+output  [1:0]  cp0_biu_lpmd_b;          
+output         cp0_ifu_no_op_req;   
+output         cp0_lsu_no_op_req;   
+output         cp0_mmu_no_op_req;   
+output         cp0_yy_clk_en;       
+output         lpmd_cmplt;          
+output  [1:0]  lpmd_top_cur_state;  
+
+// &Regs; @26
+reg     [1:0]  cur_state;           
+reg     [1:0]  lpmd_b;              
+reg     [1:0]  next_state;          
+
+// &Wires; @27
+wire           biu_cp0_event_wakeup; 
+wire           biu_cp0_int_wakeup;  
+wire           biu_yy_xx_no_op;     
+wire           cp0_biu_int_vld;     
+wire    [1:0]  cp0_biu_lpmd_b;           
+wire           cp0_ifu_no_op_req;   
+wire           cp0_lsu_no_op_req;   
+wire           cp0_mmu_no_op_req;   
+wire           cp0_yy_clk_en;       
+wire           cpu_in_lpmd;         
+wire           cpuclk;              
+wire           cpurst_b;            
+wire           forever_cpuclk;          
+wire           ifu_yy_xx_no_op;     
+wire           inst_lpmd_ex1_ex2;   
+wire           rtu_ck_flush_older_than_ex1;
+wire           lpmd_ack;            
+wire           lpmd_clk_en;         
+wire           lpmd_cmplt;          
+wire           lpmd_in_wait_state;  
+wire    [1:0]  lpmd_top_cur_state;  
+wire           lsu_yy_xx_no_op;     
+wire           mmu_yy_xx_no_op;     
+wire           pad_yy_icg_scan_en;  
+wire           regs_lpmd_int_vld;   
+wire           regs_xx_icg_en;      
+wire           rtu_yy_xx_dbgon;     
+wire           rtu_yy_xx_flush;     
+wire           rtu_ck_flush;
+
+//==========================================================
+//                  Risc-V Debug zdb Begin
+//==========================================================
+input          dtu_cp0_wake_up;
+
+wire           dtu_cp0_wake_up;
+//==========================================================
+//                  Risc-V Debug zdb End
+//==========================================================
+
+//==========================================================
+//                 Instance of Gated Cell  
+//==========================================================
+// &Instance("gated_clk_cell", "x_lpmd_gated_clk"); @32
+gated_clk_cell  x_lpmd_gated_clk (
+  .clk_in             (forever_cpuclk    ),
+  .clk_out            (cpuclk            ),
+  .external_en        (1'b0              ),
+  .local_en           (lpmd_clk_en       ),
+  .module_en          (regs_xx_icg_en    ),
+  .pad_yy_icg_scan_en (pad_yy_icg_scan_en)
+);
+
+// &Connect(.clk_in      (forever_cpuclk), @33
+//          .external_en (1'b0), @34
+//          .module_en   (regs_xx_icg_en), @35
+//          .local_en    (lpmd_clk_en), @36
+//          .clk_out     (cpuclk)); @37
+//----------------------------------------------------------
+//   Handling the low power operating modes
+//----------------------------------------------------------
+// Request the BIU to enter low power mode and do
+// not accept any more transaction from IFU or LSU
+                     
+//-------------------FSM of lpmd req logic------------------
+// State Description:
+// IDLE : no lpmd instruction (wfi)
+// WAIT : request biu and wait for biu ack
+//        the lpmd request        
+// LPMD : wait for wake up and then cmplt lpmd inst
+//----------------------------------------------------------
+
+parameter IDLE  = 2'b00;
+parameter SWAIT = 2'b01;
+parameter LPMD  = 2'b10;
+
+assign lpmd_clk_en = inst_lpmd_ex1_ex2 || cur_state[1:0] != IDLE;
+always @(posedge cpuclk or negedge cpurst_b)
+begin
+  if(!cpurst_b)
+    cur_state[1:0] <= IDLE;
+  else if(rtu_yy_xx_flush)
+    cur_state[1:0] <= IDLE;
+  else if(cur_state[1:0]==SWAIT && rtu_ck_flush && rtu_ck_flush_older_than_ex1) //ck_flush younger ex1->ex2, ck_flush@LTL
+    cur_state[1:0] <= IDLE;
+  else
+    cur_state[1:0] <= next_state[1:0];
+end
+
+// &CombBeg; @67
+always @( cur_state[1:0]
+       or lpmd_ack
+       or inst_lpmd_ex1_ex2
+       or cpu_in_lpmd)
+begin
+  case(cur_state[1:0])
+  IDLE      : if(inst_lpmd_ex1_ex2)
+                next_state[1:0] = SWAIT;
+              else
+                next_state[1:0] = IDLE;
+  SWAIT     : if(lpmd_ack)
+                next_state[1:0] = LPMD;
+              else
+                next_state[1:0] = SWAIT;
+  LPMD      : if(!cpu_in_lpmd)
+                next_state[1:0] = IDLE;
+              else
+                next_state[1:0] = LPMD;
+  default   :   next_state[1:0] = IDLE;
+  endcase
+// &CombEnd; @83
+end
+
+assign lpmd_in_wait_state = cur_state[0];
+
+assign lpmd_top_cur_state[1:0] = cur_state[1:0];
+
+//----------------conctol signal by lpmd FSM----------------
+//req if entering into WAIT state
+assign cp0_ifu_no_op_req = lpmd_in_wait_state;
+assign cp0_lsu_no_op_req = lpmd_in_wait_state;
+assign cp0_mmu_no_op_req = lpmd_in_wait_state;
+
+//----------------------------------------------------------
+//               lpmd request ack 
+//----------------------------------------------------------
+assign lpmd_ack = lpmd_in_wait_state
+                  && ifu_yy_xx_no_op
+                  && lsu_yy_xx_no_op
+                  && biu_yy_xx_no_op
+                  && mmu_yy_xx_no_op;
+
+assign lpmd_cmplt = (cur_state[1:0] == LPMD) && !cpu_in_lpmd;
+
+//----------------------------------------------------------
+// Send lpmd bits to BIU and HAD, when
+// cp0 can enter low power mode (get biu_cp0_no_op)
+//----------------------------------------------------------
+// &Force("output","cp0_biu_lpmd_b"); @110
+assign cp0_biu_int_vld = regs_lpmd_int_vld;
+
+always @(posedge forever_cpuclk or negedge cpurst_b)
+begin
+  if(!cpurst_b)
+    lpmd_b[1:0] <= 2'b11;
+  else if(biu_cp0_int_wakeup || rtu_yy_xx_dbgon || biu_cp0_event_wakeup || dtu_cp0_wake_up) // Risc-V Debug zdb
+    lpmd_b[1:0] <= 2'b11;
+  else if(lpmd_ack && !cpu_in_lpmd)
+  begin
+    if(inst_lpmd_ex1_ex2)
+      lpmd_b[1:0] <= 2'b00;
+    else
+      lpmd_b[1:0] <= 2'b11;
+  end
+  else
+    lpmd_b[1:0] <= lpmd_b[1:0];
+end
+
+assign cp0_biu_lpmd_b[1:0] = lpmd_b[1:0];
+
+//cpu ack in debug mode
+assign cpu_in_lpmd     = !(lpmd_b[1] & lpmd_b[0]);
+
+//======================================================
+//Generate clock enable signal to clock module
+//Disable the clock when low power mode is entered
+//======================================================
+// &Force("output","cp0_yy_clk_en"); @141
+assign cp0_yy_clk_en = lpmd_b[1] & lpmd_b[0];
+
+// &ModuleEnd; @144
+endmodule
+
+
