@@ -187,7 +187,9 @@ S_eligible[c] = L[c] &&  mideleg[c] && (pm==S ? sstatus.SIE : pm==U)
 
 **RTL实现（当前特权 `pm`）**：当 `pm_wen` 为 1，`pm_wdata` 的精确优先级为 `rtu_cp0_exit_debug` > `rtu_cp0_enter_debug` > `iui_regs_inst_mret` > `iui_regs_inst_sret` > RTU trap target（`!mdeleg_vld`→M，`mdeleg_vld`→S）。因此同拍 debug exit/enter、xRET 与 trap 不能按“先后到达”的抽象规则比较，必须按此组合链采样。
 
-**RTL实现（status-stack / trap CSR）**：各 M 状态寄存器的优先级为 M trap > MRET > 对应 CSR write；各 S 状态寄存器为 S trap > SRET > 对应 CSR write。也就是说，同拍 matching trap 与 xRET 时 stack/CSR 取 trap 值，而 `pm` 仍按上表的 debug/xRET/trap 链更新；这种 dual-valid/并发组合必须由集成 testbench 显式约束或覆盖。锚点：`wk_cp0_regs.v:2144-2247`, `:2531-2600`, `:2846-2910`, `:3207-3268`。
+**RTL实现（status-stack）**：各 M 状态栈寄存器（MPP/MPIE/MIE）的优先级为 M trap > MRET > 对应 status CSR write；各 S 状态栈寄存器（SPP/SPIE/SIE）为 S trap > SRET > 对应 status CSR write。
+
+**RTL实现（trap CSR）**：MEPC/MCAUSE/MTVAL 的优先级为 M trap > 对应 CSR write；SEPC/SCAUSE/STVAL 为 S trap > 对应 CSR write。xRET 只读取 xEPC 并更新 status-stack/`pm`，不是这些 trap CSR 的竞争写入者。故同拍 matching trap+xRET 时 status-stack 取 trap 值；trap CSR 也仅因 trap 覆盖同拍 CSR write，而非“trap 胜 xRET”。`pm` 仍按上表的 debug/xRET/trap 链更新。这种 dual-valid/并发组合必须由集成 testbench 显式约束或覆盖。锚点：`wk_cp0_regs.v:2144-2247`, `:2531-2600`, `:2846-2912`, `:3207-3268`。
 
 |事件|前置|状态转移|返回/后效|
 |---|---|---|---|
@@ -290,9 +292,15 @@ function apply_concurrent_pm(s, e):
   return S if e.trap && e.mdeleg_vld else M   # RTU trap target
 
 function apply_status_stack(s, e):
-  # Per-bank priority differs from pm: matching trap > xRET > CSR write.
+  # Status-stack only: matching trap > matching xRET > status CSR write.
   M = trap_M(e) ? trap_M_values(s,e) : e.mret ? mret_values(s) : csr_M_values(s,e)
   S = trap_S(e) ? trap_S_values(s,e) : e.sret ? sret_values(s) : csr_S_values(s,e)
+  return {M,S}
+
+function apply_trap_csrs(s, e):
+  # xRET is read-only for xEPC/xCAUSE/xTVAL: trap > matching CSR write.
+  M = trap_M(e) ? trap_M_csrs(e) : csr_M_trap_values(s,e)
+  S = trap_S(e) ? trap_S_csrs(e) : csr_S_trap_values(s,e)
   return {M,S}
 
 # WFI notification/wake contract: cp0_biu_int_vld = regs_lpmd_int_vld.
@@ -330,7 +338,7 @@ function apply_status_stack(s, e):
 |D22|Debug enter/exit 与同拍 M/S trap/xRET|组合刺激|按 `exit > enter > MRET > SRET > trap` 检查 `pm`，并检查 `cp0_dtu_mexpt_vld`。|
 |D23|`ADD_AIA` 关闭/开启可用环境|AIA CSR/major src|分别验证 IMSIC bridge 资格、MVIEN/MVIP、MTOPI/STOPI；缺宏则标阻塞，不宣称编译通过。|
 |D24|`mtvec/stvec` mode=2/3 和多 cause|CSR write/read + trap entry|同时检查 CSR readback 与 `cp0_ifu_vbr` 都强制 mode[1]=0、保留 mode[0]；下游 offset 未在 CP0 断言，记录集成结果。|
-|D25|同拍 `exit_debug/enter_debug/MRET/SRET/trap`，并分别同拍 matching trap+xRET+CSR write|在 `regs_flush_clk` 采样|`pm` 按 `exit > enter > MRET > SRET > trap`；M/S status-stack/trap CSR 各按 matching trap > matching xRET > CSR write。|
+|D25|同拍 `exit_debug/enter_debug/MRET/SRET/trap`；另做 matching trap+xRET+status CSR write 与 matching trap+trap CSR write|在 `regs_flush_clk` 采样|`pm` 按 `exit > enter > MRET > SRET > trap`；M/S status-stack 按 matching trap > matching xRET > status CSR write；MEPC/MCAUSE/MTVAL、SEPC/SCAUSE/STVAL 按 matching trap > trap CSR write，xRET 不参与该竞争。|
 
 ### 6.3 断言/性质描述
 
@@ -348,7 +356,7 @@ function apply_status_stack(s, e):
 12. **非法系统指令**：无 privilege 的 CSR/xRET/WFI 在 EX2 发 cause2+opcode MTVAL，valid 至 flush/下一 EX2 更新前保持。
 13. **WFI wake**：`biu_cp0_int_wakeup`（而非 `regs_lpmd_int_vld/cp0_biu_int_vld` 直接作用）以及 event/debug/DTU 任一 wake 使 `lpmd_b` 回 `11`；四 no-op 不全时不得写 `00`。
 14. **dual-valid 一致性**：若集成规定同拍 valid，任何 `rtu_cp0_expt_vld xor rtu_yy_xx_expt_vld` 都应报接口违例（不是 CP0 已修复的设计结论）。
-15. **并发优先级**：驱动 D25 的所有互斥/重叠组合；`pm` 必须满足 `exit > enter > MRET > SRET > trap`，而 matching M/S status-stack 与 trap CSR 必须满足 trap > xRET > CSR write。
+15. **并发优先级**：驱动 D25 的所有互斥/重叠组合；`pm` 必须满足 `exit > enter > MRET > SRET > trap`；matching M/S status-stack 必须满足 trap > xRET > status CSR write；MEPC/MCAUSE/MTVAL 与 SEPC/SCAUSE/STVAL 必须满足 trap > trap CSR write，xRET 不得被建模为该类 CSR 写竞争者。
 
 ### 6.4 覆盖与采样/签核
 
