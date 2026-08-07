@@ -66,6 +66,32 @@ class Interaction22AgClarificationTests(unittest.TestCase):
 
         self.assertTrue(_is_assigned(task, "lsu_mmu_abort"))
 
+    def test_assignment_check_rejects_system_call_in_predicate(self) -> None:
+        task = 'expect_true($cast(bus.lsu_mmu_abort, rhs), "cast");'
+
+        self.assertTrue(_is_assigned(task, "lsu_mmu_abort"))
+
+    def test_assignment_check_rejects_ref_style_call_in_predicate(self) -> None:
+        task = """
+            function automatic logic mutate(ref logic value);
+              value = 1'b1;
+              return value;
+            endfunction
+            expect_true(mutate(bus.lsu_mmu_abort), "mutation");
+        """
+
+        self.assertTrue(_is_assigned(task, "lsu_mmu_abort"))
+
+    def test_assignment_check_rejects_method_or_package_call_in_predicate(self) -> None:
+        for call in (
+            "observer.mutate(bus.lsu_mmu_abort)",
+            "guard_pkg::mutate(bus.lsu_mmu_abort)",
+        ):
+            with self.subTest(call=call):
+                task = f'expect_true({call}, "nested call");'
+
+                self.assertTrue(_is_assigned(task, "lsu_mmu_abort"))
+
     def test_assignment_check_rejects_output_or_ref_task_argument(self) -> None:
         for declaration in ("output logic value", "ref logic value"):
             with self.subTest(declaration=declaration):
@@ -88,6 +114,17 @@ class Interaction22AgClarificationTests(unittest.TestCase):
 
         self.assertFalse(_is_assigned(task, "lag_ex1_stall_restart_entry"))
         self.assertTrue(_is_observed(task, "lag_ex1_stall_restart_entry"))
+
+    def test_assignment_check_allows_grouping_parentheses_only(self) -> None:
+        task = """
+            expect_true(
+                ((((bus.lsu_mmu_abort))) && ready),
+                "grouped observation"
+            );
+        """
+
+        self.assertFalse(_is_assigned(task, "lsu_mmu_abort"))
+        self.assertTrue(_is_observed(task, "lsu_mmu_abort"))
 
     def test_assignment_check_ignores_dut_output_names_in_comments_and_strings(self) -> None:
         task = """

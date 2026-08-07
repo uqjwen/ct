@@ -142,20 +142,49 @@ def _executable_text(text: str) -> str:
     return "".join(result)
 
 
+def _call_argument_ranges(text: str) -> list[tuple[int, int]]:
+    """Return argument ranges for calls, excluding grouping parentheses."""
+    stack: list[tuple[int, bool]] = []
+    ranges: list[tuple[int, int]] = []
+    for index, char in enumerate(text):
+        if char == "(":
+            token_end = index - 1
+            while token_end >= 0 and text[token_end].isspace():
+                token_end -= 1
+            opens_call = token_end >= 0 and (
+                text[token_end].isalnum() or text[token_end] in "_$]"
+            )
+            stack.append((index, opens_call))
+        elif char == ")" and stack:
+            opening, opens_call = stack.pop()
+            if opens_call:
+                ranges.append((opening + 1, index))
+    return ranges
+
+
 def _is_assigned(task_body: str, signal: str) -> bool:
     executable = _executable_text(task_body)
     predicates = _expect_true_predicate_ranges(executable)
     pattern = re.compile(rf"\b(?:bus\.|dut\.){re.escape(signal)}\b")
     for match in pattern.finditer(executable):
-        predicate = next(
+        predicate_range = next(
             (
-                executable[start:end]
+                (start, end)
                 for start, end in predicates
                 if start <= match.start() and match.end() <= end
             ),
             None,
         )
-        if predicate is None:
+        if predicate_range is None:
+            return True
+        predicate_start, predicate_end = predicate_range
+        predicate = executable[predicate_start:predicate_end]
+        relative_start = match.start() - predicate_start
+        relative_end = match.end() - predicate_start
+        if any(
+            start <= relative_start and relative_end <= end
+            for start, end in _call_argument_ranges(predicate)
+        ):
             return True
         if re.search(
             r"(?:\+\+|--|<<<=|>>>=|<<=|>>=|\+=|-=|\*=|/=|%=|&=|\|=|\^="
