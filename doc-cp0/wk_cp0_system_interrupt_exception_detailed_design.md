@@ -254,6 +254,10 @@ S_request_eligible[c] = L[c] && mideleg[c] && (pm==S ? sstatus.SIE : pm==U)
 以下模型不得复用 DUT `int_sel`、`casez` 或 DUT CSR；它以采样的端口/CSR 镜像独立算出期望，再在请求低有效、RTU trap 和 xRET 事务边界采样。
 
 ```text
+VEC_NUM_CAUSES = {1,2,3,4,5,6,7,8,9,11,12,13,15,16,17,18}
+# Hand-transcribe this set from the decoded cause rows in the RTL vec_num case;
+# cause 23 is deliberately absent and must not be inferred from mideleg[23].
+
 function pending(s):
   return {1:s.mvssip, 3:s.biu_ms, 5:s.stip_s|s.biu_st, 7:s.biu_mt,
           9:s.seip_s|s.biu_se, 11:s.biu_me, 13:s.hpcp,

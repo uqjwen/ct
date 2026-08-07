@@ -180,7 +180,37 @@ def _term_width(term: str) -> tuple[set[int], int]:
     return set(range(low, high + 1)), high - low + 1
 
 
-def _delegable_exceptions(regs: str, assignments: dict[str, str]) -> list[int]:
+def _vec_num_mapping(regs: str) -> dict[int, int]:
+    case = re.search(
+        r"\bcase\s*\(\s*rtu_yy_xx_expt_vec\s*\[\s*4\s*:\s*0\s*\]\s*\)"
+        r"(?P<body>.*?)\bendcase\b",
+        regs,
+        flags=re.DOTALL,
+    )
+    if case is None:
+        raise ContractError("vec_num exception case is missing")
+    mappings = re.findall(
+        r"5\s*'\s*d\s*(\d+)\s*:\s*vec_num\s*\[\s*18\s*:\s*0\s*\]"
+        r"\s*=\s*19\s*'\s*h\s*([0-9a-f]+)\s*;",
+        case.group("body"),
+        flags=re.IGNORECASE,
+    )
+    result: dict[int, int] = {}
+    for cause_text, encoded in mappings:
+        cause = int(cause_text)
+        if cause in result:
+            raise ContractError(f"duplicate vec_num mapping for cause {cause}")
+        one_hot = int(encoded, 16)
+        if one_hot == 0 or one_hot >= (1 << 19) or one_hot & (one_hot - 1):
+            raise ContractError(f"vec_num mapping is not 19-bit one-hot for cause {cause}")
+        bit = one_hot.bit_length() - 1
+        result[cause] = bit
+    return result
+
+
+def _delegable_exceptions(
+    assignments: dict[str, str], vec_num_mapping: dict[int, int]
+) -> list[int]:
     update = assignments.get("edeleg_upd_val")
     if update is None:
         raise ContractError("edeleg update assignment is missing")
@@ -199,28 +229,10 @@ def _delegable_exceptions(regs: str, assignments: dict[str, str]) -> list[int]:
     if position != -1:
         raise ContractError("edeleg update width is not 16 bits")
 
-    case = re.search(
-        r"\bcase\s*\(\s*rtu_yy_xx_expt_vec\s*\[\s*4\s*:\s*0\s*\]\s*\)"
-        r"(?P<body>.*?)\bendcase\b",
-        regs,
-        flags=re.DOTALL,
-    )
-    if case is None:
-        raise ContractError("vec_num exception case is missing")
-    mappings = re.findall(
-        r"5\s*'\s*d\s*(\d+)\s*:\s*vec_num\s*\[\s*18\s*:\s*0\s*\]"
-        r"\s*=\s*19\s*'\s*h\s*([0-9a-f]+)\s*;",
-        case.group("body"),
-        flags=re.IGNORECASE,
-    )
     result: list[int] = []
-    for exception, encoded in mappings:
-        one_hot = int(encoded, 16)
-        if one_hot == 0 or one_hot & (one_hot - 1):
-            raise ContractError(f"vec_num mapping is not one-hot for exception {exception}")
-        bit = one_hot.bit_length() - 1
+    for exception, bit in vec_num_mapping.items():
         if bit in writable_bits:
-            result.append(int(exception))
+            result.append(exception)
     expected = [1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 13, 15]
     if result != expected:
         raise ContractError(f"delegable exceptions differ: {result}")
@@ -253,7 +265,9 @@ def _ack_consumers(regs: str) -> int:
     return consumers
 
 
-def _mcip_delegation(assignments: dict[str, str]) -> dict[str, object]:
+def _mcip_delegation(
+    assignments: dict[str, str], vec_num_mapping: dict[int, int]
+) -> dict[str, object]:
     request_expression = assignments.get("mcip_deleg_vld", "")
     trap_expression = assignments.get("mideleg_vld", "")
     expected_request = re.fullmatch(
@@ -261,20 +275,39 @@ def _mcip_delegation(assignments: dict[str, str]) -> dict[str, object]:
         r"&& mcip_en && mideleg_value\[23\]",
         request_expression,
     )
-    expected_trap = (
-        "(pm[1] == 1'b0) && rtu_yy_xx_expt_vec[5] "
-        "&& |(vec_num[18:0] & mideleg_value[18:0])"
+    trap_path = re.fullmatch(
+        r"\(pm\[1\] == 1'b0\) && rtu_yy_xx_expt_vec\[5\] "
+        r"&& \|\(vec_num\[(\d+):(\d+)\] & mideleg_value\[(\d+):(\d+)\]\)",
+        trap_expression,
     )
-    if expected_request is None or trap_expression != expected_trap:
-        raise ContractError(
-            "MCIP delegation differs: "
-            f"request={request_expression!r} trap={trap_expression!r}"
-        )
-    return {
+    if trap_path is None:
+        trap_ranges: tuple[int, int, int, int] | None = None
+    else:
+        trap_ranges = tuple(int(value) for value in trap_path.groups())
+    cause_bit = vec_num_mapping.get(23)
+    trap_classifies_supervisor = bool(
+        cause_bit is not None
+        and trap_ranges is not None
+        and trap_ranges[1] <= cause_bit <= trap_ranges[0]
+        and trap_ranges[3] <= cause_bit <= trap_ranges[2]
+    )
+    result = {
+        "cause": 23,
+        "request_selects_supervisor": expected_request is not None,
+        "trap_classifies_supervisor": trap_classifies_supervisor,
+    }
+    expected = {
         "cause": 23,
         "request_selects_supervisor": True,
         "trap_classifies_supervisor": False,
     }
+    if trap_ranges != (18, 0, 18, 0) or 23 in vec_num_mapping or result != expected:
+        raise ContractError(
+            "MCIP delegation differs: "
+            f"request={request_expression!r} trap={trap_expression!r} "
+            f"vec_num_causes={list(vec_num_mapping)} result={result}"
+        )
+    return result
 
 
 def _require(source: str, label: str, *patterns: str) -> bool:
@@ -337,6 +370,7 @@ def check_contract(root: Path = ROOT) -> dict[str, object]:
     sources = _read_modules(root.resolve())
     top_submodules = _topology(sources["wk_cp0_top"])
     assignments = _assignments(sources["wk_cp0_regs"])
+    vec_num_mapping = _vec_num_mapping(sources["wk_cp0_regs"])
     interrupt_sources = {name: assignments.get(name) for name in EXPECTED_SOURCES}
     if interrupt_sources != EXPECTED_SOURCES:
         raise ContractError(f"interrupt sources differ: {interrupt_sources}")
@@ -349,8 +383,8 @@ def check_contract(root: Path = ROOT) -> dict[str, object]:
         "top_submodules": top_submodules,
         "interrupt_sources": interrupt_sources,
         "interrupt_priority": {"selectors": selectors, "causes": causes, "live": live},
-        "delegable_exceptions": _delegable_exceptions(sources["wk_cp0_regs"], assignments),
-        "mcip_delegation": _mcip_delegation(assignments),
+        "delegable_exceptions": _delegable_exceptions(assignments, vec_num_mapping),
+        "mcip_delegation": _mcip_delegation(assignments, vec_num_mapping),
         "ack_consumers": _ack_consumers(sources["wk_cp0_regs"]),
         "key_paths": _key_paths(
             sources["wk_cp0_iui"], sources["wk_cp0_regs"], sources["wk_cp0_lpmd"]

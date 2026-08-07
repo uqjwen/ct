@@ -127,11 +127,11 @@ source -> pending -> local enable -> privilege/global gate
 - IUI 优先级 case 有 15 槽位、两个不可达槽位和 13 个有效槽位，cause 顺序与 RTL 基线一致；
 - 实际可委托异常集合由 `vec_num` 解码和 `edeleg` 可写掩码交集得到；
 - `rtu_cp0_int_ack` 在 `wk_cp0_regs` module body 中没有语义消费者；扫描忽略注释、字符串和无初始化声明，但必须识别 `wire/reg` 声明赋值及独立赋值中的引用；
-- 以结构化 JSON 固化 MCIP cause23 的 request-side delegated=true、trap-side delegated=false；
+- 复用实际 `vec_num` case 解析结果，以结构化 JSON 固化 MCIP cause23 的 request-side delegated=true、trap-side delegated=false，并显式拒绝新增 cause23 decode；
 - `key_paths` 必须精确包含五个预期键且均为 true；WFI 路径必须同时包含四个 `lpmd_ack` 输入和四个 wake 输入；
 - 无效 CLI 参数也必须只输出单行 `CP0_CONTRACT_FAIL:` 并非零退出。
 
-测试不检查中文句子或文档固定措辞。测试直接运行工具，并通过临时复制/最小变异验证错误的优先级 cause、缺失子模块、ACK 独立赋值/声明赋值消费者、MCIP request/trap 委托结构漂移，以及 WFI BIU ack/debug wake 缺失会被拒绝；注释/字符串不被误报。每个变异对应“设计文档已陈旧却仍被判定有效”这一具体故障。
+测试不检查中文句子或文档固定措辞。测试直接运行工具，并通过临时复制/最小变异验证错误的优先级 cause、缺失子模块、ACK 独立赋值/声明赋值消费者、MCIP request/trap 委托结构漂移、合法新增的 cause23 `vec_num` case 行，以及 WFI BIU ack/debug wake 缺失会被拒绝；注释/字符串不被误报。每个变异对应“设计文档已陈旧却仍被判定有效”这一具体故障。
 
 ## 8. 源码观察到的待确认项
 

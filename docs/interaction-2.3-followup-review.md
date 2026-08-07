@@ -13,14 +13,14 @@
 |检查|命令|本次结果|
 |---|---|---|
 |CP0 静态合同|`python3 tools/check_interaction_2_3_cp0_contract.py`|`CP0_CONTRACT_PASS modules=4 submodules=3 interrupt_sources=8 priority_slots=15 live_slots=13 delegable_exceptions=12 ack_consumers=0`|
-|CP0 单元/变异测试|`python3 -m unittest tests.test_interaction_2_3_cp0_contract -v`|13 tests，0 failures，`OK`；覆盖 MCIP 两侧、ACK 声明赋值/非消费者、CLI 与 WFI 定向变异。|
-|全仓 Python 单元测试|`python3 -m unittest discover -s tests -v`|90 tests，0 failures，`OK`|
+|CP0 单元/变异测试|`python3 -m unittest tests.test_interaction_2_3_cp0_contract -v`|14 tests，0 failures，`OK`；覆盖 MCIP 两侧及 cause23 `vec_num` 新行、ACK 声明赋值/非消费者、CLI 与 WFI 定向变异。|
+|全仓 Python 单元测试|`python3 -m unittest discover -s tests -v`|91 tests，0 failures，`OK`|
 |既有 LSU preflight|`make -C verif/common preflight`|7 environments、85 features、534 scenarios；`LSU_PREFLIGHT_PASS` 与 `INTERACTION_2_1_PREFLIGHT_PASS`|
 |全交付 whitespace 覆盖|`git diff --check 473b3c23794a7841f3c31fc667a4964fda9a28d4..HEAD`|最终提交后 exit 0、无输出；覆盖基线至最终 HEAD 的不可变已提交范围|
 |生产范围|`git diff 473b3c2...HEAD -- cp0 srcs README.md`|exit 0，无输出（0 个 CP0/`srcs`/README 变更）|
 |分支状态（创建本报告前）|`git status --short --branch`|`## review/interaction-2.3-v1`；clean baseline，无工作树条目|
 
-合同 marker 证明检查器从当前四个 RTL 文件抽取并核对四模块/三子模块拓扑、八类中断源、15 个优先级槽（13 live）和 12 个有效异常委托 cause；JSON 还固定精确五项 `key_paths`，并给出结构事实 `mcip_delegation={cause:23, request_selects_supervisor:true, trap_classifies_supervisor:false}`。这意味着 MCIP 可由 `mideleg_value[23]` 进入 delegated request 槽，但 RTU 回送 cause23 时因 `vec_num` 没有该行而由 `mideleg_vld` 分类为 M trap。
+合同 marker 证明检查器从当前四个 RTL 文件抽取并核对四模块/三子模块拓扑、八类中断源、15 个优先级槽（13 live）和 12 个有效异常委托 cause；JSON 还固定精确五项 `key_paths`，并给出结构事实 `mcip_delegation={cause:23, request_selects_supervisor:true, trap_classifies_supervisor:false}`。该 trap-side 值由与异常委托共用的实际 `vec_num` cause→one-hot-bit 映射及 `[18:0]` 相交范围计算，并额外强制 cause23 不得出现在映射中；因此 MCIP 可由 `mideleg_value[23]` 进入 delegated request 槽，但 RTU 回送 cause23 时由 `mideleg_vld` 分类为 M trap。
 
 对 `ack_consumers=0`，证明范围仍很窄：检查器只扫描已解析的 `wk_cp0_regs` module body，忽略注释、字符串文本和无初始化声明，同时保留 `wire/reg ... = rtu_cp0_int_ack` 初始化右值和独立语句中的引用。它不证明另外三个文件没有语义消费者，也不证明顶层连通性；更广观察仍须由系统集成和动态测试确认。marker/JSON 也不证明外部宏、完整 CP0 filelist、上游/下游接口时序或动态行为。
 

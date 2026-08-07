@@ -49,7 +49,7 @@
 
 - [ ] **Step 1: Write the failing real-RTL and mutation tests**
 
-Create the focused real-RTL and mutation suite (13 tests at final review):
+Create the focused real-RTL and mutation suite (14 tests at final review):
 
 1. `test_real_rtl_contract_passes_and_reports_hand_derived_facts` runs the checker with `--json`, asserts exit 0, and compares literal hand-derived values:
    - modules: `wk_cp0_top`, `wk_cp0_iui`, `wk_cp0_regs`, `wk_cp0_lpmd`;
@@ -64,7 +64,7 @@ Create the focused real-RTL and mutation suite (13 tests at final review):
 3. `test_rejects_missing_top_submodule` removes/renames the `wk_cp0_lpmd x_wk_cp0_lpmd` instance in the temporary copy and expects topology failure.
 4. `test_rejects_new_interrupt_ack_consumer` adds a continuous assignment consuming `rtu_cp0_int_ack` before `wk_cp0_regs` endmodule and expects ack-consumer failure.
 
-Also cover priority-selector and duplicate-assignment drift, `wire` declaration-assignment ACK consumption, comment/string non-consumers, both sides of the MCIP delegation fact, BIU no-op/debug-wake removal, and invalid argparse input's single-line failure contract.
+Also cover priority-selector and duplicate-assignment drift, `wire` declaration-assignment ACK consumption, comment/string non-consumers, both sides of the MCIP delegation fact, insertion of a legal cause23 `vec_num` case row, BIU no-op/debug-wake removal, and invalid argparse input's single-line failure contract.
 
 The mutations represent a stale verification reference being incorrectly accepted; they are not tests of comments or formatting.
 
@@ -98,7 +98,7 @@ ssip_deleg_vld, stip_deleg_vld, moip_deleg_vld
 - parse the IUI `casez(regs_iui_int_sel[14:0])` rows and preserve all 15 cause values;
 - derive the effective delegated exception set by intersecting the one-hot bit selected by `vec_num` with the writable source-bit set represented by `edeleg_upd_val`;
 - count `rtu_cp0_int_ack` semantic consumers in `wk_cp0_regs` after comments, strings, the port-list entry, and bare declarations are excluded; declaration initializers such as `wire used = rtu_cp0_int_ack;` remain consumers and fail;
-- expose and validate the structured MCIP fact: request-side delegated selection uses `mideleg_value[23]`, while trap-side `mideleg_vld` cannot classify returned cause 23 as S because `vec_num` ends at cause 18;
+- parse `vec_num` once into a cause-to-one-hot-bit mapping, reuse it for exception delegation and the structured MCIP fact, and validate that request-side delegated selection uses `mideleg_value[23]` while cause23 is absent from the mapping and cannot reach trap-side S classification through `[18:0]`;
 - validate exactly five key paths structurally: IUI illegal cause/mtval, M trap CSR update, S trap CSR update, MRET/SRET return PC, and WFI no-op/wakeup FSM; WFI requires all four ack and all four wake terms;
 - emit deterministic JSON with `--json`; otherwise emit the exact success marker;
 - catch expected parse/contract/argparse failures in `main()` and emit one failure line without a traceback.
@@ -113,7 +113,7 @@ python3 tools/check_interaction_2_3_cp0_contract.py
 python3 tools/check_interaction_2_3_cp0_contract.py --json
 ```
 
-Expected: 13 tests pass, the marker has the exact counts above, and JSON is stable and parseable.
+Expected: 14 tests pass, the marker has the exact counts above, and JSON is stable and parseable.
 
 - [ ] **Step 5: Self-review and commit**
 

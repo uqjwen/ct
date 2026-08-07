@@ -255,6 +255,32 @@ class Interaction23Cp0ContractTests(unittest.TestCase):
         self.assertNotEqual(0, completed.returncode)
         self.assertIn("mcip delegation", completed.stderr.lower())
 
+    def test_rejects_mcip_cause_23_vec_num_decode(self) -> None:
+        temporary, root = self.temporary_cp0_root()
+        with temporary:
+            regs = root / "cp0/wk_cp0_regs.v"
+            contents = regs.read_text(encoding="utf-8")
+            original = (
+                "  5'd18:   vec_num[18:0] = 19'h40000;\n"
+                "  default: vec_num[18:0] = 19'h0;"
+            )
+            self.assertIn(original, contents)
+            regs.write_text(
+                contents.replace(
+                    original,
+                    "  5'd18:   vec_num[18:0] = 19'h40000;\n"
+                    "  5'd23:   vec_num[18:0] = 19'h40000;\n"
+                    "  default: vec_num[18:0] = 19'h0;",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+
+            completed = self.run_checker("--root", str(root))
+
+        self.assertNotEqual(0, completed.returncode)
+        self.assertIn("mcip delegation", completed.stderr.lower())
+
     def test_rejects_wfi_ack_missing_biu_term(self) -> None:
         temporary, root = self.temporary_cp0_root()
         with temporary:
